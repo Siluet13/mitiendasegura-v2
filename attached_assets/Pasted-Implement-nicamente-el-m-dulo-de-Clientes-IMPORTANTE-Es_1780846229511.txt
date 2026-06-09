@@ -1,0 +1,95 @@
+Implementá únicamente el módulo de Clientes.
+
+IMPORTANTE:
+
+Este proyecto fue iniciado en Lovable y debe mantener compatibilidad futura con Lovable.
+
+NO modificar arquitectura existente.
+NO reemplazar librerías.
+NO reorganizar carpetas.
+NO cambiar TanStack Router.
+NO cambiar React Query.
+NO cambiar Supabase.
+NO cambiar Vite.
+NO cambiar TypeScript.
+NO cambiar autenticación.
+NO cambiar persistencia de sesión.
+
+Implementar directamente.
+
+Objetivo:
+
+Agregar gestión completa de clientes e integración con ventas.
+
+Crear tabla:
+
+customers
+
+- id UUID PRIMARY KEY
+- owner_id UUID NOT NULL
+- nombre TEXT NOT NULL
+- telefono TEXT
+- email TEXT
+- direccion TEXT
+- observaciones TEXT
+- created_at TIMESTAMPTZ
+
+Base de datos:
+
+- UUID como PK.
+- Índices para búsquedas por nombre.
+- Índices para búsquedas por teléfono.
+- Índices para búsquedas por email.
+- RLS siguiendo exactamente el mismo patrón utilizado en products, sales y stock_movements.
+- owner_id gestionado automáticamente por triggers.
+- user_id automático si la arquitectura actual lo requiere.
+
+Validaciones:
+
+- Nombre obligatorio.
+- Email opcional pero válido cuando exista.
+- No permitir duplicados con mismo nombre y teléfono para el mismo owner.
+- Validaciones tanto en frontend como en base de datos.
+
+Funcionalidades:
+
+Clientes:
+
+- Crear cliente.
+- Editar cliente.
+- Eliminar cliente.
+- Listar clientes.
+- Buscar por nombre.
+- Buscar por teléfono.
+- Buscar por email.
+
+Ventas:
+
+- Permitir seleccionar cliente al crear una venta.
+- Mantener ventas sin cliente como opción válida.
+- Guardar correctamente customer_id.
+- Mostrar cliente asociado en listado de ventas.
+- Mostrar cliente asociado en detalle de venta.
+
+UI:
+
+- Pantalla Clientes.
+- Tabla responsive.
+- Buscador.
+- Formulario alta/edición.
+- Selector de cliente dentro del formulario de ventas.
+
+Mantener:
+
+- React Query.
+- TypeScript estricto.
+- React Hook Form.
+- Zod.
+- Supabase.
+- shadcn/ui.
+- Diseño azul y verde existente.
+- Compatibilidad móvil.
+
+Preparación futura obligatoria:
+
+Diseñar la estructura para soportar posteriormente

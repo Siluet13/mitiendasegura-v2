@@ -1,0 +1,55 @@
+modules = ["nodejs-20", "web", "postgresql-16"]
+[agent]
+expertMode = true
+stack = "BEST_EFFORT_FALLBACK"
+integrations = ["javascript_database:1.0.0"]
+
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+SUPABASE_PROJECT_ID = "izwnaxfjitcboowkzauu"
+SUPABASE_URL = "https://izwnaxfjitcboowkzauu.supabase.co"
+VITE_SUPABASE_URL = "https://izwnaxfjitcboowkzauu.supabase.co"
+VITE_SUPABASE_PROJECT_ID = "izwnaxfjitcboowkzauu"
+VITE_SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml6d25heGZqaXRjYm9vd2t6YXV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjkzNjYsImV4cCI6MjA5NjQwNTM2Nn0.9-HGUD_hnl92QA71Hlafp8pRfeEiG_qzIHMmAHM4hxA"
+SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml6d25heGZqaXRjYm9vd2t6YXV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjkzNjYsImV4cCI6MjA5NjQwNTM2Nn0.9-HGUD_hnl92QA71Hlafp8pRfeEiG_qzIHMmAHM4hxA"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bun run dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3000
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["bun", "run", "preview"]
+build = ["bun", "run", "build"]
