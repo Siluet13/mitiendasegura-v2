@@ -1,0 +1,3 @@
+- [POS SaaS Architecture](pos-saas-arch.md) — Express API port 5001 + Vite SPA port 5000; auth is Replit OIDC, NOT Supabase (Supabase was fully removed).
+- [Dashboard N+1 Fix](dashboard-n1-fix.md) — recent-sales and top-products had N+1 / full-table JS aggregation; replaced with JOIN+COUNT and SQL GROUP BY in dashboard.ts.
+- [PWA Setup](pwa-setup.md) — vite-plugin-pwa added; icons in public/icons/; offline page at public/offline.html; Workbox NetworkFirst for /api, CacheFirst for static assets.

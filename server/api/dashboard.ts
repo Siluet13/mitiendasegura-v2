@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { eq, and, gte, lt, lte, desc, count, sql } from "drizzle-orm";
+import { eq, and, gte, lt, desc, count, sum } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { products, customers, sales, saleItems } from "@shared/schema";
@@ -25,6 +25,7 @@ function daysAgo(days: number) {
 }
 
 export function registerDashboardRoutes(app: Express): void {
+  // ── KPIs ──────────────────────────────────────────────────────────────────
   app.get("/api/dashboard/kpis", isAuthenticated, async (req: any, res) => {
     const ownerId = req.user.claims.sub;
     const { start, end } = todayRange();
@@ -53,6 +54,7 @@ export function registerDashboardRoutes(app: Express): void {
     });
   });
 
+  // ── Stock alerts ──────────────────────────────────────────────────────────
   app.get("/api/dashboard/stock-alerts", isAuthenticated, async (req: any, res) => {
     const ownerId = req.user.claims.sub;
     const rows = await db
@@ -68,71 +70,65 @@ export function registerDashboardRoutes(app: Express): void {
     });
   });
 
+  // ── Top products — SQL GROUP BY (replaces full-table JS aggregation) ──────
   app.get("/api/dashboard/top-products", isAuthenticated, async (req: any, res) => {
     const ownerId = req.user.claims.sub;
+
     const rows = await db
       .select({
         productId: saleItems.productId,
-        cantidad: saleItems.cantidad,
-        subtotal: saleItems.subtotal,
         nombre: products.nombre,
+        unidades: sum(saleItems.cantidad).mapWith(Number),
+        importe: sum(saleItems.subtotal).mapWith(Number),
       })
       .from(saleItems)
-      .leftJoin(sales, eq(saleItems.saleId, sales.id))
+      .innerJoin(sales, eq(saleItems.saleId, sales.id))
       .leftJoin(products, eq(saleItems.productId, products.id))
-      .where(eq(sales.ownerId, ownerId));
+      .where(eq(sales.ownerId, ownerId))
+      .groupBy(saleItems.productId, products.nombre)
+      .orderBy(desc(sum(saleItems.cantidad)))
+      .limit(10);
 
-    const map = new Map<string, { product_id: string; nombre: string; unidades: number; importe: number }>();
-    for (const item of rows) {
-      if (!item.productId) continue;
-      const ex = map.get(item.productId);
-      if (ex) {
-        ex.unidades += item.cantidad ?? 0;
-        ex.importe += Number(item.subtotal ?? 0);
-      } else {
-        map.set(item.productId, {
-          product_id: item.productId,
-          nombre: item.nombre ?? "Producto eliminado",
-          unidades: item.cantidad ?? 0,
-          importe: Number(item.subtotal ?? 0),
-        });
-      }
-    }
-    res.json(Array.from(map.values()).sort((a, b) => b.unidades - a.unidades).slice(0, 10));
+    res.json(
+      rows.map((r) => ({
+        product_id: r.productId,
+        nombre: r.nombre ?? "Producto eliminado",
+        unidades: r.unidades ?? 0,
+        importe: r.importe ?? 0,
+      }))
+    );
   });
 
+  // ── Recent sales — single JOIN query replaces N+1 COUNT per sale ──────────
   app.get("/api/dashboard/recent-sales", isAuthenticated, async (req: any, res) => {
     const ownerId = req.user.claims.sub;
+
     const rows = await db
       .select({
         id: sales.id,
         createdAt: sales.createdAt,
         total: sales.total,
-        customerId: sales.customerId,
+        cantidad_productos: count(saleItems.id),
       })
       .from(sales)
+      .leftJoin(saleItems, eq(saleItems.saleId, sales.id))
       .where(eq(sales.ownerId, ownerId))
+      .groupBy(sales.id, sales.createdAt, sales.total)
       .orderBy(desc(sales.createdAt))
       .limit(10);
 
-    const result = await Promise.all(
-      rows.map(async (s) => {
-        const itemCount = await db
-          .select({ count: count() })
-          .from(saleItems)
-          .where(eq(saleItems.saleId, s.id));
-        return {
-          id: s.id,
-          created_at: s.createdAt,
-          total: Number(s.total),
-          cliente: null as string | null,
-          cantidad_productos: itemCount[0]?.count ?? 0,
-        };
-      })
+    res.json(
+      rows.map((s) => ({
+        id: s.id,
+        created_at: s.createdAt,
+        total: Number(s.total),
+        cliente: null as string | null,
+        cantidad_productos: s.cantidad_productos ?? 0,
+      }))
     );
-    res.json(result);
   });
 
+  // ── Sales by day (last 7 days) ────────────────────────────────────────────
   app.get("/api/dashboard/sales-by-day", isAuthenticated, async (req: any, res) => {
     const ownerId = req.user.claims.sub;
     const since = daysAgo(6);
@@ -154,5 +150,110 @@ export function registerDashboardRoutes(app: Express): void {
       map.set(key, (map.get(key) ?? 0) + Number(s.total));
     }
     res.json(Array.from(map.entries()).map(([fecha, total]) => ({ fecha, total })));
+  });
+
+  // ── All dashboard data in a single round-trip ─────────────────────────────
+  app.get("/api/dashboard/all", isAuthenticated, async (req: any, res) => {
+    const ownerId = req.user.claims.sub;
+    const { start, end } = todayRange();
+    const mStart = monthStart();
+    const since = daysAgo(6);
+
+    const [
+      todaySales,
+      monthSales,
+      activeProductsCount,
+      customersCount,
+      stockRows,
+      topProductsRows,
+      recentSalesRows,
+      salesByDayRows,
+    ] = await Promise.all([
+      db.select({ total: sales.total })
+        .from(sales)
+        .where(and(eq(sales.ownerId, ownerId), gte(sales.createdAt, start), lt(sales.createdAt, end))),
+      db.select({ total: sales.total })
+        .from(sales)
+        .where(and(eq(sales.ownerId, ownerId), gte(sales.createdAt, mStart))),
+      db.select({ count: count() })
+        .from(products)
+        .where(and(eq(products.ownerId, ownerId), eq(products.activo, true))),
+      db.select({ count: count() })
+        .from(customers)
+        .where(eq(customers.ownerId, ownerId)),
+      db.select({ id: products.id, nombre: products.nombre, stock: products.stock, stockMinimo: products.stockMinimo })
+        .from(products)
+        .where(and(eq(products.ownerId, ownerId), eq(products.activo, true)))
+        .orderBy(products.stock),
+      db.select({
+        productId: saleItems.productId,
+        nombre: products.nombre,
+        unidades: sum(saleItems.cantidad).mapWith(Number),
+        importe: sum(saleItems.subtotal).mapWith(Number),
+      })
+        .from(saleItems)
+        .innerJoin(sales, eq(saleItems.saleId, sales.id))
+        .leftJoin(products, eq(saleItems.productId, products.id))
+        .where(eq(sales.ownerId, ownerId))
+        .groupBy(saleItems.productId, products.nombre)
+        .orderBy(desc(sum(saleItems.cantidad)))
+        .limit(10),
+      db.select({
+        id: sales.id,
+        createdAt: sales.createdAt,
+        total: sales.total,
+        cantidad_productos: count(saleItems.id),
+      })
+        .from(sales)
+        .leftJoin(saleItems, eq(saleItems.saleId, sales.id))
+        .where(eq(sales.ownerId, ownerId))
+        .groupBy(sales.id, sales.createdAt, sales.total)
+        .orderBy(desc(sales.createdAt))
+        .limit(10),
+      db.select({ createdAt: sales.createdAt, total: sales.total })
+        .from(sales)
+        .where(and(eq(sales.ownerId, ownerId), gte(sales.createdAt, since)))
+        .orderBy(sales.createdAt),
+    ]);
+
+    const alerts = stockRows.filter((p) => p.stock <= p.stockMinimo || p.stock === 0);
+
+    const dayMap = new Map<string, number>();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dayMap.set(d.toISOString().slice(0, 10), 0);
+    }
+    for (const s of salesByDayRows) {
+      const key = s.createdAt.toISOString().slice(0, 10);
+      dayMap.set(key, (dayMap.get(key) ?? 0) + Number(s.total));
+    }
+
+    res.json({
+      kpis: {
+        salesToday: todaySales.reduce((s, r) => s + Number(r.total), 0),
+        salesMonth: monthSales.reduce((s, r) => s + Number(r.total), 0),
+        activeProducts: activeProductsCount[0]?.count ?? 0,
+        totalCustomers: customersCount[0]?.count ?? 0,
+      },
+      stockAlerts: {
+        sinStock: alerts.filter((p) => p.stock === 0),
+        stockBajo: alerts.filter((p) => p.stock > 0 && p.stock <= p.stockMinimo),
+      },
+      topProducts: topProductsRows.map((r) => ({
+        product_id: r.productId,
+        nombre: r.nombre ?? "Producto eliminado",
+        unidades: r.unidades ?? 0,
+        importe: r.importe ?? 0,
+      })),
+      recentSales: recentSalesRows.map((s) => ({
+        id: s.id,
+        created_at: s.createdAt,
+        total: Number(s.total),
+        cliente: null as string | null,
+        cantidad_productos: s.cantidad_productos ?? 0,
+      })),
+      salesByDay: Array.from(dayMap.entries()).map(([fecha, total]) => ({ fecha, total })),
+    });
   });
 }
