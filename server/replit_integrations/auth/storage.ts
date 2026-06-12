@@ -1,4 +1,4 @@
-import { users, type User, type UpsertUser } from "@shared/schema";
+import { users, licenses, type User, type UpsertUser } from "@shared/schema";
 import { db } from "../../db";
 import { eq } from "drizzle-orm";
 
@@ -22,6 +22,25 @@ class AuthStorage implements IAuthStorage {
         set: { ...userData, updatedAt: new Date() },
       })
       .returning();
+
+    const adminId = process.env.MASTER_ADMIN_ID;
+    const isAdmin = !!adminId && user.id === adminId;
+
+    if (isAdmin) {
+      await db
+        .insert(licenses)
+        .values({ ownerId: user.id, status: "activa" })
+        .onConflictDoUpdate({
+          target: licenses.ownerId,
+          set: { status: "activa", updatedAt: new Date() },
+        });
+    } else {
+      await db
+        .insert(licenses)
+        .values({ ownerId: user.id, status: "pendiente" })
+        .onConflictDoNothing();
+    }
+
     return user;
   }
 }

@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { ArrowLeftRight, LayoutDashboard, LogOut, Package, Settings, ShoppingCart, Tags, Users } from "lucide-react";
+import { ArrowLeftRight, Database, LayoutDashboard, LogOut, Package, Settings, ShoppingCart, Tags, Users } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -22,6 +22,7 @@ const items = [
   { title: "Ventas", url: "/sales", icon: ShoppingCart },
   { title: "Clientes", url: "/customers", icon: Users },
   { title: "Configuración", url: "/settings", icon: Settings },
+  { title: "Backup", url: "/backup", icon: Database },
 ] as const;
 
 export function AppSidebar() {
