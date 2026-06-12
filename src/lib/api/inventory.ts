@@ -1,47 +1,83 @@
-import { supabase } from "@/integrations/supabase/client";
-import type { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
+const API = "";
 
-export type Category = Tables<"categories">;
-export type Product = Tables<"products"> & { categories?: { nombre: string } | null };
+export type Category = {
+  id: string;
+  ownerId: string;
+  nombre: string;
+  createdAt: string;
+  updatedAt: string;
+};
 
-// ---------------- Categories ----------------
-export async function listCategories(): Promise<Category[]> {
-  const { data, error } = await supabase
-    .from("categories")
-    .select("*")
-    .order("nombre", { ascending: true });
-  if (error) throw error;
-  return data ?? [];
-}
+export type Product = {
+  id: string;
+  ownerId: string;
+  categoryId: string | null;
+  nombre: string;
+  descripcion: string | null;
+  sku: string | null;
+  codigoBarras: string | null;
+  codigo_barras: string | null;
+  precio: string | number;
+  costo: string | number;
+  stock: number;
+  stockMinimo: number;
+  stock_minimo: number;
+  activo: boolean;
+  createdAt: string;
+  updatedAt: string;
+  category_id: string | null;
+  categories?: { nombre: string } | null;
+};
 
-export async function createCategory(input: { nombre: string }) {
-  const payload: TablesInsert<"categories"> = { nombre: input.nombre } as TablesInsert<"categories">;
-  const { data, error } = await supabase.from("categories").insert(payload).select().single();
-  if (error) throw error;
-  return data;
-}
+export type Customer = {
+  id: string;
+  ownerId: string;
+  nombre: string;
+  telefono: string | null;
+  email: string | null;
+  direccion: string | null;
+  observaciones: string | null;
+  createdAt: string;
+};
 
-export async function updateCategory(id: string, input: { nombre: string }) {
-  const payload: TablesUpdate<"categories"> = { nombre: input.nombre };
-  const { data, error } = await supabase.from("categories").update(payload).eq("id", id).select().single();
-  if (error) throw error;
-  return data;
-}
+export type Sale = {
+  id: string;
+  ownerId: string;
+  userId: string;
+  customerId: string | null;
+  total: string | number;
+  observacion: string | null;
+  createdAt: string;
+};
 
-export async function deleteCategory(id: string) {
-  const { error } = await supabase.from("categories").delete().eq("id", id);
-  if (error) throw error;
-}
+export type SaleItem = {
+  id: string;
+  saleId: string;
+  productId: string;
+  cantidad: number;
+  precioUnitario: string | number;
+  subtotal: string | number;
+  createdAt: string;
+  products?: { nombre: string; sku: string | null } | null;
+};
 
-// ---------------- Products ----------------
-export async function listProducts(): Promise<Product[]> {
-  const { data, error } = await supabase
-    .from("products")
-    .select("*, categories(nombre)")
-    .order("nombre", { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as Product[];
-}
+export type SaleWithItems = Sale & { sale_items: SaleItem[] };
+
+export type SaleItemInput = { product_id: string; cantidad: number };
+
+export type StockMovement = {
+  id: string;
+  ownerId: string;
+  userId: string;
+  productId: string;
+  tipo: "entrada" | "salida";
+  cantidad: number;
+  observacion: string | null;
+  referenciaTipo: string | null;
+  referenciaId: string | null;
+  createdAt: string;
+  products?: { nombre: string; sku: string | null } | null;
+};
 
 export type ProductInput = {
   nombre: string;
@@ -56,30 +92,6 @@ export type ProductInput = {
   activo: boolean;
 };
 
-export async function createProduct(input: ProductInput) {
-  const payload = { ...input } as TablesInsert<"products">;
-  const { data, error } = await supabase.from("products").insert(payload).select().single();
-  if (error) throw error;
-  return data;
-}
-
-export async function updateProduct(id: string, input: ProductInput) {
-  const payload = { ...input } as TablesUpdate<"products">;
-  const { data, error } = await supabase.from("products").update(payload).eq("id", id).select().single();
-  if (error) throw error;
-  return data;
-}
-
-export async function deleteProduct(id: string) {
-  const { error } = await supabase.from("products").delete().eq("id", id);
-  if (error) throw error;
-}
-
-// ---------------- Stock movements ----------------
-export type StockMovement = Tables<"stock_movements"> & {
-  products?: { nombre: string; sku: string | null } | null;
-};
-
 export type StockMovementInput = {
   product_id: string;
   tipo: "entrada" | "salida";
@@ -87,20 +99,54 @@ export type StockMovementInput = {
   observacion?: string | null;
 };
 
-export async function listStockMovements(params: { productId?: string | null } = {}): Promise<StockMovement[]> {
-  let q = supabase
-    .from("stock_movements")
-    .select("*, products(nombre, sku)")
-    .order("created_at", { ascending: false });
-  if (params.productId) q = q.eq("product_id", params.productId);
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data ?? []) as StockMovement[];
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API}${path}`, {
+    ...options,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message ?? res.statusText);
+  }
+  return res.json();
 }
 
-// ---------------- Customers ----------------
-export type Customer = Tables<"customers">;
+// ── Categories ────────────────────────────────────────────────────────────────
+export async function listCategories(): Promise<Category[]> {
+  return apiFetch("/api/categories");
+}
 
+export async function createCategory(input: { nombre: string }) {
+  return apiFetch("/api/categories", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function updateCategory(id: string, input: { nombre: string }) {
+  return apiFetch(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export async function deleteCategory(id: string) {
+  return apiFetch(`/api/categories/${id}`, { method: "DELETE" });
+}
+
+// ── Products ──────────────────────────────────────────────────────────────────
+export async function listProducts(): Promise<Product[]> {
+  return apiFetch("/api/products");
+}
+
+export async function createProduct(input: ProductInput) {
+  return apiFetch("/api/products", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function updateProduct(id: string, input: ProductInput) {
+  return apiFetch(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export async function deleteProduct(id: string) {
+  return apiFetch(`/api/products/${id}`, { method: "DELETE" });
+}
+
+// ── Customers ─────────────────────────────────────────────────────────────────
 export type CustomerInput = {
   nombre: string;
   telefono?: string | null;
@@ -110,71 +156,28 @@ export type CustomerInput = {
 };
 
 export async function listCustomers(): Promise<Customer[]> {
-  const { data, error } = await supabase
-    .from("customers")
-    .select("*")
-    .order("nombre", { ascending: true });
-  if (error) throw error;
-  return data ?? [];
+  return apiFetch("/api/customers");
 }
 
 export async function createCustomer(input: CustomerInput): Promise<Customer> {
-  const payload: TablesInsert<"customers"> = {
-    nombre: input.nombre,
-    telefono: input.telefono ?? null,
-    email: input.email ?? null,
-    direccion: input.direccion ?? null,
-    observaciones: input.observaciones ?? null,
-  } as TablesInsert<"customers">;
-  const { data, error } = await supabase.from("customers").insert(payload).select().single();
-  if (error) throw error;
-  return data as Customer;
+  return apiFetch("/api/customers", { method: "POST", body: JSON.stringify(input) });
 }
 
 export async function updateCustomer(id: string, input: CustomerInput): Promise<Customer> {
-  const payload: TablesUpdate<"customers"> = {
-    nombre: input.nombre,
-    telefono: input.telefono ?? null,
-    email: input.email ?? null,
-    direccion: input.direccion ?? null,
-    observaciones: input.observaciones ?? null,
-  };
-  const { data, error } = await supabase.from("customers").update(payload).eq("id", id).select().single();
-  if (error) throw error;
-  return data as Customer;
+  return apiFetch(`/api/customers/${id}`, { method: "PUT", body: JSON.stringify(input) });
 }
 
 export async function deleteCustomer(id: string) {
-  const { error } = await supabase.from("customers").delete().eq("id", id);
-  if (error) throw error;
+  return apiFetch(`/api/customers/${id}`, { method: "DELETE" });
 }
 
-// ---------------- Sales ----------------
-export type Sale = Tables<"sales">;
-export type SaleItem = Tables<"sale_items"> & {
-  products?: { nombre: string; sku: string | null } | null;
-};
-export type SaleWithItems = Sale & { sale_items: SaleItem[] };
-
-export type SaleItemInput = { product_id: string; cantidad: number };
-
+// ── Sales ─────────────────────────────────────────────────────────────────────
 export async function listSales(): Promise<Sale[]> {
-  const { data, error } = await supabase
-    .from("sales")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return data ?? [];
+  return apiFetch("/api/sales");
 }
 
 export async function getSaleWithItems(id: string): Promise<SaleWithItems | null> {
-  const { data, error } = await supabase
-    .from("sales")
-    .select("*, sale_items(*, products(nombre, sku))")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw error;
-  return (data as SaleWithItems | null) ?? null;
+  return apiFetch(`/api/sales/${id}`);
 }
 
 export async function createSale(input: {
@@ -182,23 +185,31 @@ export async function createSale(input: {
   observacion?: string | null;
   customer_id?: string | null;
 }) {
-  const { data, error } = await supabase.rpc("create_sale", {
-    p_items: input.items as unknown as never,
-    p_observacion: input.observacion ?? undefined,
-    p_customer_id: input.customer_id ?? undefined,
+  const data = await apiFetch<{ id: string }>("/api/sales", {
+    method: "POST",
+    body: JSON.stringify({
+      items: input.items,
+      observacion: input.observacion,
+      customer_id: input.customer_id,
+    }),
   });
-  if (error) throw error;
-  return data as string;
+  return data.id;
+}
+
+// ── Stock Movements ───────────────────────────────────────────────────────────
+export async function listStockMovements(params: { productId?: string | null } = {}): Promise<StockMovement[]> {
+  const qs = params.productId ? `?productId=${params.productId}` : "";
+  return apiFetch(`/api/stock-movements${qs}`);
 }
 
 export async function createStockMovement(input: StockMovementInput) {
-  const payload = {
-    product_id: input.product_id,
-    tipo: input.tipo,
-    cantidad: input.cantidad,
-    observacion: input.observacion ?? null,
-  } as TablesInsert<"stock_movements">;
-  const { data, error } = await supabase.from("stock_movements").insert(payload).select().single();
-  if (error) throw error;
-  return data;
+  return apiFetch("/api/stock-movements", {
+    method: "POST",
+    body: JSON.stringify({
+      product_id: input.product_id,
+      tipo: input.tipo,
+      cantidad: input.cantidad,
+      observacion: input.observacion,
+    }),
+  });
 }

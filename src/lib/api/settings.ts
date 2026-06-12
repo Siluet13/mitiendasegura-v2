@@ -1,6 +1,15 @@
-import { supabase } from "@/integrations/supabase/client";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...options,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message ?? res.statusText);
+  }
+  return res.json();
+}
 
 export interface BusinessSettings {
   id: string;
@@ -23,50 +32,12 @@ export interface BusinessSettings {
   updated_at: string;
 }
 
-export type BusinessSettingsInput = Omit<
-  BusinessSettings,
-  "id" | "owner_id" | "created_at" | "updated_at"
->;
+export type BusinessSettingsInput = Omit<BusinessSettings, "id" | "owner_id" | "created_at" | "updated_at">;
 
-// ─── Queries ─────────────────────────────────────────────────────────────────
-
-/**
- * Fetches the business settings for the current owner.
- * Returns null when no settings have been saved yet.
- */
 export async function getBusinessSettings(): Promise<BusinessSettings | null> {
-  const { data, error } = await supabase
-    .from("business_settings")
-    .select("*")
-    .maybeSingle();
-
-  if (error) throw error;
-  return (data as BusinessSettings) ?? null;
+  return apiFetch("/api/settings");
 }
 
-/**
- * Creates or updates the business settings for the current owner.
- * Uses upsert with conflict resolution on owner_id (enforced by UNIQUE constraint).
- * owner_id is injected automatically by the set_owner_id() DB trigger on INSERT.
- *
- * Future-ready: adding company_id / branch_id here enables multiempresa/sucursales
- * without modifying the core upsert logic.
- */
-export async function upsertBusinessSettings(
-  input: BusinessSettingsInput,
-): Promise<BusinessSettings> {
-  const payload = {
-    ...input,
-    updated_at: new Date().toISOString(),
-  };
-
-  const { data, error } = await supabase
-    .from("business_settings")
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .upsert(payload as any, { onConflict: "owner_id" })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as BusinessSettings;
+export async function upsertBusinessSettings(input: BusinessSettingsInput): Promise<BusinessSettings> {
+  return apiFetch("/api/settings", { method: "PUT", body: JSON.stringify(input) });
 }

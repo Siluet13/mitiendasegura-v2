@@ -1,6 +1,5 @@
-import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { ArrowLeftRight, LayoutDashboard, LogOut, Package, Settings, ShoppingCart, Tags, Users } from "lucide-react";
-import { toast } from "sonner";
 import {
   Sidebar,
   SidebarContent,
@@ -13,7 +12,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { authApi } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 
 const items = [
@@ -27,18 +25,8 @@ const items = [
 ] as const;
 
 export function AppSidebar() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const currentPath = useRouterState({ select: (s) => s.location.pathname });
-
-  async function handleLogout() {
-    try {
-      await authApi.signOut();
-      navigate({ to: "/login" });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al cerrar sesión");
-    }
-  }
 
   return (
     <Sidebar collapsible="icon">
@@ -66,13 +54,15 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter>
         <div className="px-2 pb-2 text-xs text-muted-foreground truncate">
-          {user?.email}
+          {user?.email ?? user?.firstName ?? ""}
         </div>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={handleLogout}>
-              <LogOut className="h-4 w-4" />
-              <span>Cerrar sesión</span>
+            <SidebarMenuButton asChild>
+              <a href="/api/logout">
+                <LogOut className="h-4 w-4" />
+                <span>Cerrar sesión</span>
+              </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

@@ -1,31 +1,34 @@
-import { useEffect, useState } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
+
+export interface AuthUser {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  profileImageUrl: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
 
 interface AuthState {
-  session: Session | null;
-  user: User | null;
+  user: AuthUser | null;
   loading: boolean;
 }
 
+async function fetchUser(): Promise<AuthUser | null> {
+  const res = await fetch("/api/auth/user", { credentials: "include" });
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error("Failed to fetch user");
+  return res.json();
+}
+
 export function useAuth(): AuthState {
-  const [state, setState] = useState<AuthState>({
-    session: null,
-    user: null,
-    loading: true,
+  const { data: user = null, isLoading } = useQuery<AuthUser | null>({
+    queryKey: ["/api/auth/user"],
+    queryFn: fetchUser,
+    retry: false,
+    staleTime: 1000 * 60 * 5,
   });
 
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setState({ session, user: session?.user ?? null, loading: false });
-    });
-
-    supabase.auth.getSession().then(({ data }) => {
-      setState({ session: data.session, user: data.session?.user ?? null, loading: false });
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  return state;
+  return { user, loading: isLoading };
 }
