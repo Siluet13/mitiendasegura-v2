@@ -17,8 +17,7 @@ export default defineConfig({
       registerType: "autoUpdate",
       injectRegister: "auto",
       devOptions: {
-        enabled: true,
-        type: "module",
+        enabled: false,
       },
       manifest: {
         name: "Mi Tienda Segura",
