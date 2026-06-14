@@ -67,5 +67,24 @@
     </p>
     <button onclick="location.reload()">Reintentar</button>
   </div>
+  <script>
+    (function () {
+      if (!('serviceWorker' in navigator)) return;
+      if (sessionStorage.getItem('sw-unregistered')) return;
+      sessionStorage.setItem('sw-unregistered', '1');
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        var unregAll = regs.map(function (r) { return r.unregister(); });
+        return Promise.all(unregAll);
+      }).then(function () {
+        if ('caches' in window) {
+          return caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          });
+        }
+      }).then(function () {
+        window.location.reload();
+      });
+    })();
+  </script>
 </body>
 </html>
