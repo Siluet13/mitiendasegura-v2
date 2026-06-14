@@ -24,6 +24,8 @@ app.use(express.json());
   registerSettingsRoutes(app);
   registerBackupRoutes(app);
 
+  app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
   const port = parseInt(process.env.PORT ?? "5001");
   app.listen(port, "0.0.0.0", () => {
     console.log(`API server running on port ${port}`);

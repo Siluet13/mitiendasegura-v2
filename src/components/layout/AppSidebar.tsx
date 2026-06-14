@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { ArrowLeftRight, Database, LayoutDashboard, LogOut, Package, RefreshCw, Settings, ShoppingCart, Tags, Users } from "lucide-react";
+import { ArrowLeftRight, Building2, Database, LayoutDashboard, LogOut, Package, RefreshCw, Settings, ShoppingCart, Tags, Users } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -25,6 +25,10 @@ const items = [
   { title: "Backup", url: "/backup", icon: Database },
 ] as const;
 
+const ADMIN_ITEMS = [
+  { title: "Panel Maestro", url: "/admin", icon: Building2 },
+] as const;
+
 export function AppSidebar() {
   const { user } = useAuth();
   const currentPath = useRouterState({ select: (s) => s.location.pathname });
@@ -40,6 +44,23 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {items.map((item) => (
+                <SidebarMenuItem key={item.url}>
+                  <SidebarMenuButton asChild isActive={currentPath === item.url}>
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Administración</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {ADMIN_ITEMS.map((item) => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild isActive={currentPath === item.url}>
                     <Link to={item.url}>
