@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { ArrowLeftRight, Database, LayoutDashboard, LogOut, Package, Settings, ShoppingCart, Tags, Users } from "lucide-react";
+import { ArrowLeftRight, Database, LayoutDashboard, LogOut, Package, RefreshCw, Settings, ShoppingCart, Tags, Users } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -58,6 +58,14 @@ export function AppSidebar() {
           {user?.email ?? user?.firstName ?? ""}
         </div>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild>
+              <a href="/api/logout-switch">
+                <RefreshCw className="h-4 w-4" />
+                <span>Cambiar cuenta</span>
+              </a>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
               <a href="/api/logout">
