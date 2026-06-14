@@ -10,6 +10,7 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
+MASTER_ADMIN_ID = "60287485"
 
 [workflows]
 runButton = "Project"
