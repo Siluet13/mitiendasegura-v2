@@ -13,16 +13,21 @@ import {
   businessSettings,
 } from "@shared/schema";
 
+function noTenant(res: any) {
+  return res.status(500).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
+}
+
 export function registerBackupRoutes(app: Express): void {
   app.get("/api/backup/export", isAuthenticated, async (req, res) => {
-    const { userId } = requireTenant(req);
+    const { userId, tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
 
     const [bsData, catsData, prodsData, custsData, salesData] = await Promise.all([
       db.select().from(businessSettings).where(eq(businessSettings.ownerId, userId)),
-      db.select().from(categories).where(eq(categories.ownerId, userId)),
-      db.select().from(products).where(eq(products.ownerId, userId)),
-      db.select().from(customers).where(eq(customers.ownerId, userId)),
-      db.select().from(sales).where(eq(sales.ownerId, userId)),
+      db.select().from(categories).where(eq(categories.tenantId, tenantId)),
+      db.select().from(products).where(eq(products.tenantId, tenantId)),
+      db.select().from(customers).where(eq(customers.tenantId, tenantId)),
+      db.select().from(sales).where(eq(sales.tenantId, tenantId)),
     ]);
 
     const saleIds = salesData.map((s) => s.id);
@@ -30,7 +35,7 @@ export function registerBackupRoutes(app: Express): void {
       saleIds.length > 0
         ? db.select().from(saleItems).where(inArray(saleItems.saleId, saleIds))
         : Promise.resolve([]),
-      db.select().from(stockMovements).where(eq(stockMovements.ownerId, userId)),
+      db.select().from(stockMovements).where(eq(stockMovements.tenantId, tenantId)),
     ]);
 
     const payload = {
@@ -65,6 +70,7 @@ export function registerBackupRoutes(app: Express): void {
 
   app.post("/api/backup/restore", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
     const body = req.body;
 
     if (!body?.version || !body?.data) {
@@ -86,21 +92,21 @@ export function registerBackupRoutes(app: Express): void {
 
     try {
       await db.transaction(async (tx) => {
-        await tx.delete(stockMovements).where(eq(stockMovements.ownerId, userId));
+        await tx.delete(stockMovements).where(eq(stockMovements.tenantId, tenantId));
 
         const existingSales = await tx
           .select({ id: sales.id })
           .from(sales)
-          .where(eq(sales.ownerId, userId));
+          .where(eq(sales.tenantId, tenantId));
         if (existingSales.length > 0) {
           await tx
             .delete(saleItems)
             .where(inArray(saleItems.saleId, existingSales.map((s) => s.id)));
         }
-        await tx.delete(sales).where(eq(sales.ownerId, userId));
-        await tx.delete(products).where(eq(products.ownerId, userId));
-        await tx.delete(customers).where(eq(customers.ownerId, userId));
-        await tx.delete(categories).where(eq(categories.ownerId, userId));
+        await tx.delete(sales).where(eq(sales.tenantId, tenantId));
+        await tx.delete(products).where(eq(products.tenantId, tenantId));
+        await tx.delete(customers).where(eq(customers.tenantId, tenantId));
+        await tx.delete(categories).where(eq(categories.tenantId, tenantId));
         await tx.delete(businessSettings).where(eq(businessSettings.ownerId, userId));
 
         if (data.businessSettings) {

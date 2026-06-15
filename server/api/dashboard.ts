@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { eq, and, or, isNull, gte, lt, desc, count, sum } from "drizzle-orm";
+import { eq, and, gte, lt, desc, count, sum } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
@@ -25,42 +25,31 @@ function daysAgo(days: number) {
   return d;
 }
 
-function scopeWhere(
-  tenantCol: any,
-  ownerCol: any,
-  tenantId: string | null,
-  userId: string,
-) {
-  if (tenantId) {
-    return or(eq(tenantCol, tenantId), and(isNull(tenantCol), eq(ownerCol, userId)));
-  }
-  return eq(ownerCol, userId);
+function noTenant(res: any) {
+  return res.status(500).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
 }
 
 export function registerDashboardRoutes(app: Express): void {
   // ── KPIs ──────────────────────────────────────────────────────────────────
   app.get("/api/dashboard/kpis", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
     const { start, end } = todayRange();
     const mStart = monthStart();
-
-    const salesScope = scopeWhere(sales.tenantId, sales.ownerId, tenantId, userId);
-    const prodScope = scopeWhere(products.tenantId, products.ownerId, tenantId, userId);
-    const custScope = scopeWhere(customers.tenantId, customers.ownerId, tenantId, userId);
 
     const [todaySales, monthSales, activeProductsCount, customersCount] = await Promise.all([
       db.select({ total: sales.total })
         .from(sales)
-        .where(and(salesScope, gte(sales.createdAt, start), lt(sales.createdAt, end))),
+        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, start), lt(sales.createdAt, end))),
       db.select({ total: sales.total })
         .from(sales)
-        .where(and(salesScope, gte(sales.createdAt, mStart))),
+        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, mStart))),
       db.select({ count: count() })
         .from(products)
-        .where(and(prodScope, eq(products.activo, true))),
+        .where(and(eq(products.tenantId, tenantId), eq(products.activo, true))),
       db.select({ count: count() })
         .from(customers)
-        .where(custScope),
+        .where(eq(customers.tenantId, tenantId)),
     ]);
 
     res.json({
@@ -73,11 +62,12 @@ export function registerDashboardRoutes(app: Express): void {
 
   // ── Stock alerts ──────────────────────────────────────────────────────────
   app.get("/api/dashboard/stock-alerts", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
     const rows = await db
       .select({ id: products.id, nombre: products.nombre, stock: products.stock, stockMinimo: products.stockMinimo })
       .from(products)
-      .where(and(scopeWhere(products.tenantId, products.ownerId, tenantId, userId), eq(products.activo, true)))
+      .where(and(eq(products.tenantId, tenantId), eq(products.activo, true)))
       .orderBy(products.stock);
 
     const alerts = rows.filter((p) => p.stock <= p.stockMinimo || p.stock === 0);
@@ -89,7 +79,8 @@ export function registerDashboardRoutes(app: Express): void {
 
   // ── Top products ──────────────────────────────────────────────────────────
   app.get("/api/dashboard/top-products", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
 
     const rows = await db
       .select({
@@ -101,7 +92,7 @@ export function registerDashboardRoutes(app: Express): void {
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
       .leftJoin(products, eq(saleItems.productId, products.id))
-      .where(scopeWhere(sales.tenantId, sales.ownerId, tenantId, userId))
+      .where(eq(sales.tenantId, tenantId))
       .groupBy(saleItems.productId, products.nombre)
       .orderBy(desc(sum(saleItems.cantidad)))
       .limit(10);
@@ -118,7 +109,8 @@ export function registerDashboardRoutes(app: Express): void {
 
   // ── Recent sales ──────────────────────────────────────────────────────────
   app.get("/api/dashboard/recent-sales", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
 
     const rows = await db
       .select({
@@ -129,7 +121,7 @@ export function registerDashboardRoutes(app: Express): void {
       })
       .from(sales)
       .leftJoin(saleItems, eq(saleItems.saleId, sales.id))
-      .where(scopeWhere(sales.tenantId, sales.ownerId, tenantId, userId))
+      .where(eq(sales.tenantId, tenantId))
       .groupBy(sales.id, sales.createdAt, sales.total)
       .orderBy(desc(sales.createdAt))
       .limit(10);
@@ -147,13 +139,14 @@ export function registerDashboardRoutes(app: Express): void {
 
   // ── Sales by day (last 7 days) ────────────────────────────────────────────
   app.get("/api/dashboard/sales-by-day", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
     const since = daysAgo(6);
 
     const rows = await db
       .select({ createdAt: sales.createdAt, total: sales.total })
       .from(sales)
-      .where(and(scopeWhere(sales.tenantId, sales.ownerId, tenantId, userId), gte(sales.createdAt, since)))
+      .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, since)))
       .orderBy(sales.createdAt);
 
     const map = new Map<string, number>();
@@ -171,14 +164,11 @@ export function registerDashboardRoutes(app: Express): void {
 
   // ── All dashboard data in a single round-trip ─────────────────────────────
   app.get("/api/dashboard/all", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
     const { start, end } = todayRange();
     const mStart = monthStart();
     const since = daysAgo(6);
-
-    const salesScope = scopeWhere(sales.tenantId, sales.ownerId, tenantId, userId);
-    const prodScope = scopeWhere(products.tenantId, products.ownerId, tenantId, userId);
-    const custScope = scopeWhere(customers.tenantId, customers.ownerId, tenantId, userId);
 
     const [
       todaySales,
@@ -192,19 +182,19 @@ export function registerDashboardRoutes(app: Express): void {
     ] = await Promise.all([
       db.select({ total: sales.total })
         .from(sales)
-        .where(and(salesScope, gte(sales.createdAt, start), lt(sales.createdAt, end))),
+        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, start), lt(sales.createdAt, end))),
       db.select({ total: sales.total })
         .from(sales)
-        .where(and(salesScope, gte(sales.createdAt, mStart))),
+        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, mStart))),
       db.select({ count: count() })
         .from(products)
-        .where(and(prodScope, eq(products.activo, true))),
+        .where(and(eq(products.tenantId, tenantId), eq(products.activo, true))),
       db.select({ count: count() })
         .from(customers)
-        .where(custScope),
+        .where(eq(customers.tenantId, tenantId)),
       db.select({ id: products.id, nombre: products.nombre, stock: products.stock, stockMinimo: products.stockMinimo })
         .from(products)
-        .where(and(prodScope, eq(products.activo, true)))
+        .where(and(eq(products.tenantId, tenantId), eq(products.activo, true)))
         .orderBy(products.stock),
       db.select({
         productId: saleItems.productId,
@@ -215,7 +205,7 @@ export function registerDashboardRoutes(app: Express): void {
         .from(saleItems)
         .innerJoin(sales, eq(saleItems.saleId, sales.id))
         .leftJoin(products, eq(saleItems.productId, products.id))
-        .where(salesScope)
+        .where(eq(sales.tenantId, tenantId))
         .groupBy(saleItems.productId, products.nombre)
         .orderBy(desc(sum(saleItems.cantidad)))
         .limit(10),
@@ -227,13 +217,13 @@ export function registerDashboardRoutes(app: Express): void {
       })
         .from(sales)
         .leftJoin(saleItems, eq(saleItems.saleId, sales.id))
-        .where(salesScope)
+        .where(eq(sales.tenantId, tenantId))
         .groupBy(sales.id, sales.createdAt, sales.total)
         .orderBy(desc(sales.createdAt))
         .limit(10),
       db.select({ createdAt: sales.createdAt, total: sales.total })
         .from(sales)
-        .where(and(salesScope, gte(sales.createdAt, since)))
+        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, since)))
         .orderBy(sales.createdAt),
     ]);
 

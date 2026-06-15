@@ -1,49 +1,71 @@
 ---
 name: SaaS Foundation
-description: Multi-tenant structural base + dual-compatibility enforcement activated across all business routes.
+description: Multi-tenant architecture — schema, middleware, auth, and all business routes. tenant_id is now the sole isolation key.
 ---
 
 # SaaS Foundation
 
-## What exists
+## Estado actual (FINAL — SaaS Strict Mode)
 
-### Schema (Phase 1)
-- `shared/models/tenants.ts` — `tenants` (id, name, owner_id, created_at) + `profiles` (id = auth user id, tenant_id nullable, role enum: owner|admin|user).
-- `shared/schema.ts` — exports `./models/tenants` between auth and inventory.
-- `shared/models/inventory.ts` — nullable `tenant_id uuid` on: categories, products, customers, sales, stockMovements. NOT on saleItems (redundant) or businessSettings (1:1 with owner).
+### Schema
+- `shared/models/tenants.ts` — `tenants` (id uuid, name, owner_id, created_at) + `profiles` (id = auth user id varchar, tenant_id uuid nullable, role enum: owner|admin|user).
+- `shared/models/inventory.ts` — nullable `tenant_id uuid` on: categories, products, customers, sales, stockMovements. NOT on saleItems (redundant) or businessSettings (1:1 with owner_id).
 
-### Dual-compatibility activation (Phase 2)
+### Auth / lazy creation
 - `server/replit_integrations/auth/storage.ts` — `upsertUser` calls `ensureProfileAndTenant()` on every login; creates tenant + profile lazily if missing; idempotent.
-- `server/middleware/tenant.ts` — `resolveTenant` middleware runs after Passport on every request; looks up `profiles.tenantId`; attaches real UUID to `req.tenantId` (null if not found — never falls back to userId string).
-- `server/lib/context.ts` — exports `getCurrentUserId(req)`, `getCurrentTenantId(req)`, `requireTenant(req)` returning `{ userId, tenantId }`.
+- After login, every user is guaranteed to have `profiles.tenant_id` set to a valid UUID.
+
+### Tenant resolution middleware
+- `server/middleware/tenant.ts` — `resolveTenant` runs after Passport on every authenticated request.
+  - Queries `profiles.tenantId` for the logged-in user.
+  - Attaches result to `req.tenantId` (UUID string or `null` if profile not found).
+  - Fallback is `null` — NEVER falls back to userId string (would corrupt UUID columns).
 - `server/index.ts` — `app.use(resolveTenant)` registered immediately after `setupAuth`.
 
-### Tenant enforcement (Phase 3 — current)
-- **`scopeWhere(tenantCol, ownerCol, tenantId, userId)`** — local helper in inventory.ts and dashboard.ts.
-  - If `tenantId` available: `tenant_id = tenantId OR (tenant_id IS NULL AND owner_id = userId)`
-  - If `tenantId` null: `owner_id = userId` (full backward compat)
-- **All business routes** now use `requireTenant` instead of `req.user.claims.sub` directly:
-  - `server/api/inventory.ts` — categories, products, customers, sales (POST preserved exactly), stock_movements
-  - `server/api/dashboard.ts` — all KPI/chart/alert endpoints + `/api/dashboard/all`
-  - `server/api/settings.ts` — uses `userId` only (businessSettings has no tenant_id column)
-  - `server/api/backup.ts` — export by userId; restore writes include `tenantId`
-- **Writes** (INSERT): always include `ownerId: userId, tenantId` on new rows
-- **Updates** (PUT): include `tenantId: tenantId ?? undefined` for lazy backfill
-- **Admin routes** (`server/api/admin.ts`, `server/api/license.ts`) — NOT changed; no tenant filter there by design
+### Context helpers
+- `server/lib/context.ts` — exports:
+  - `getCurrentUserId(req)` → string
+  - `getCurrentTenantId(req)` → string | null
+  - `requireTenant(req)` → `{ userId, tenantId }` (tenantId can be null; routes guard themselves)
 
-## Active isolation model
-- READ: dual filter — matches rows by tenantId OR by owner_id when tenantId is NULL (covers legacy data)
-- WRITE: new rows always get both `owner_id` AND `tenant_id` set
-- UPDATE: lazy backfill sets `tenant_id` on existing rows when touched
+### Business routes — STRICT tenant_id mode
+All routes pattern:
+```ts
+const { userId, tenantId } = requireTenant(req);
+if (!tenantId) return res.status(500).json({ message: "Tenant no configurado..." });
+// All WHERE: eq(table.tenantId, tenantId)
+// All INSERT: { ownerId: userId, tenantId, ...fields }
+```
 
-## Rules
+- `server/api/inventory.ts` — categories, products, customers, sales, stock_movements. POST /api/sales logic preserved exactly.
+- `server/api/dashboard.ts` — all KPI/chart/alert endpoints + /api/dashboard/all.
+- `server/api/settings.ts` — uses `userId` only (businessSettings has no tenant_id column — 1:1 with owner).
+- `server/api/backup.ts` — export by tenantId; restore deletes by tenantId; writes include tenantId.
+- `server/api/admin.ts` — NOT modified; no tenant filter (global admin view by design).
 
-**Why:** Dual filter ensures no data loss on existing rows (tenant_id NULL) while new data is fully tenant-tagged. Over time all rows migrate naturally via usage.
+### Isolation model (FINAL)
+- **READ**: `WHERE tenant_id = tenantId` — strict, no fallbacks, no OR conditions.
+- **WRITE (INSERT)**: always `{ ownerId: userId, tenantId }` on every row.
+- **WRITE (UPDATE)**: filter by `AND(eq(id, param), eq(tenantId, tenantId))`.
+- **owner_id**: retained as audit/legacy field, never used as a data isolation filter in business routes.
 
-**How to apply for new routes:**
-1. `const { userId, tenantId } = requireTenant(req)` at the top of each handler
-2. Use `scopeWhere(table.tenantId, table.ownerId, tenantId, userId)` for all WHERE clauses
-3. Include `{ ownerId: userId, tenantId }` in all INSERT values
-4. Include `tenantId: tenantId ?? undefined` in UPDATE sets
+### Database state
+- DB was empty when strict mode was activated — no backfill needed; zero legacy rows.
+- All future rows will have tenant_id set from day 1.
 
-**Next phase:** Once all rows have tenant_id set (verify with `SELECT COUNT(*) FROM products WHERE tenant_id IS NULL`), switch to strict `WHERE tenant_id = tenantId` and drop owner_id as fallback.
+## Rules for new routes
+
+**How to apply:**
+1. `const { userId, tenantId } = requireTenant(req);`
+2. `if (!tenantId) return res.status(500).json({ message: "Tenant no configurado..." });`
+3. WHERE: `eq(table.tenantId, tenantId)` (compound: `and(eq(table.id, id), eq(table.tenantId, tenantId))`)
+4. INSERT values: `{ ownerId: userId, tenantId, ...fields }`
+5. Admin routes: skip tenant filter (global view, no `if (!tenantId)` guard needed).
+
+**Why strict mode (not dual filter):** DB was empty at activation point. No legacy rows. Dual filter (OR conditions) added unnecessary complexity and a potential data-leakage surface if tenantId ever resolved incorrectly.
+
+## Ready for next phases
+- Billing: tenant is the unit of subscription — `tenants.id` is the foreign key.
+- RBAC: `profiles.role` already exists (owner | admin | user).
+- Multi-empresa: add `tenant_members` table + invite flow without touching existing isolation logic.
+- Panel maestro: query across all tenants using admin routes (already unguarded).
