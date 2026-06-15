@@ -16,6 +16,7 @@ export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["entrada", "
 export const categories = pgTable("categories", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
+  tenantId: uuid("tenant_id"),
   nombre: text("nombre").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -24,6 +25,7 @@ export const categories = pgTable("categories", {
 export const products = pgTable("products", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
+  tenantId: uuid("tenant_id"),
   categoryId: uuid("category_id").references(() => categories.id, { onDelete: "set null" }),
   nombre: text("nombre").notNull(),
   descripcion: text("descripcion"),
@@ -41,6 +43,7 @@ export const products = pgTable("products", {
 export const customers = pgTable("customers", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
+  tenantId: uuid("tenant_id"),
   nombre: text("nombre").notNull(),
   telefono: text("telefono"),
   email: text("email"),
@@ -52,6 +55,7 @@ export const customers = pgTable("customers", {
 export const sales = pgTable("sales", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
+  tenantId: uuid("tenant_id"),
   userId: varchar("user_id").notNull(),
   customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
   total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
@@ -72,6 +76,7 @@ export const saleItems = pgTable("sale_items", {
 export const stockMovements = pgTable("stock_movements", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
+  tenantId: uuid("tenant_id"),
   userId: varchar("user_id").notNull(),
   productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
   tipo: stockMovementTypeEnum("tipo").notNull(),
