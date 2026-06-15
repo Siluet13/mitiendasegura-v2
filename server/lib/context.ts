@@ -5,5 +5,5 @@ export function getCurrentUserId(req: Request): string {
 }
 
 export function getCurrentTenantId(req: Request): string | null {
-  return (req as any).user?.claims?.sub ?? null;
+  return (req as any).tenantId ?? (req as any).user?.claims?.sub ?? null;
 }

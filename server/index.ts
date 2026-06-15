@@ -7,12 +7,14 @@ import { registerBackupRoutes } from "./api/backup";
 import { registerLicenseRoutes } from "./api/license";
 import { registerAdminRoutes } from "./api/admin";
 import { checkLicense } from "./middleware/license";
+import { resolveTenant } from "./middleware/tenant";
 
 const app = express();
 app.use(express.json());
 
 (async () => {
   await setupAuth(app);
+  app.use(resolveTenant);
   registerAuthRoutes(app);
   registerLicenseRoutes(app);
   registerAdminRoutes(app);
