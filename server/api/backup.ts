@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
+import { requireTenant } from "../lib/context";
 import {
   categories,
   products,
@@ -13,15 +14,15 @@ import {
 } from "@shared/schema";
 
 export function registerBackupRoutes(app: Express): void {
-  app.get("/api/backup/export", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.get("/api/backup/export", isAuthenticated, async (req, res) => {
+    const { userId } = requireTenant(req);
 
     const [bsData, catsData, prodsData, custsData, salesData] = await Promise.all([
-      db.select().from(businessSettings).where(eq(businessSettings.ownerId, ownerId)),
-      db.select().from(categories).where(eq(categories.ownerId, ownerId)),
-      db.select().from(products).where(eq(products.ownerId, ownerId)),
-      db.select().from(customers).where(eq(customers.ownerId, ownerId)),
-      db.select().from(sales).where(eq(sales.ownerId, ownerId)),
+      db.select().from(businessSettings).where(eq(businessSettings.ownerId, userId)),
+      db.select().from(categories).where(eq(categories.ownerId, userId)),
+      db.select().from(products).where(eq(products.ownerId, userId)),
+      db.select().from(customers).where(eq(customers.ownerId, userId)),
+      db.select().from(sales).where(eq(sales.ownerId, userId)),
     ]);
 
     const saleIds = salesData.map((s) => s.id);
@@ -29,13 +30,13 @@ export function registerBackupRoutes(app: Express): void {
       saleIds.length > 0
         ? db.select().from(saleItems).where(inArray(saleItems.saleId, saleIds))
         : Promise.resolve([]),
-      db.select().from(stockMovements).where(eq(stockMovements.ownerId, ownerId)),
+      db.select().from(stockMovements).where(eq(stockMovements.ownerId, userId)),
     ]);
 
     const payload = {
       version: "1.0",
       exportedAt: new Date().toISOString(),
-      ownerId,
+      ownerId: userId,
       data: {
         businessSettings: bsData[0] ?? null,
         categories: catsData,
@@ -62,8 +63,8 @@ export function registerBackupRoutes(app: Express): void {
     res.send(json);
   });
 
-  app.post("/api/backup/restore", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.post("/api/backup/restore", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const body = req.body;
 
     if (!body?.version || !body?.data) {
@@ -85,48 +86,48 @@ export function registerBackupRoutes(app: Express): void {
 
     try {
       await db.transaction(async (tx) => {
-        await tx.delete(stockMovements).where(eq(stockMovements.ownerId, ownerId));
+        await tx.delete(stockMovements).where(eq(stockMovements.ownerId, userId));
 
         const existingSales = await tx
           .select({ id: sales.id })
           .from(sales)
-          .where(eq(sales.ownerId, ownerId));
+          .where(eq(sales.ownerId, userId));
         if (existingSales.length > 0) {
           await tx
             .delete(saleItems)
             .where(inArray(saleItems.saleId, existingSales.map((s) => s.id)));
         }
-        await tx.delete(sales).where(eq(sales.ownerId, ownerId));
-        await tx.delete(products).where(eq(products.ownerId, ownerId));
-        await tx.delete(customers).where(eq(customers.ownerId, ownerId));
-        await tx.delete(categories).where(eq(categories.ownerId, ownerId));
-        await tx.delete(businessSettings).where(eq(businessSettings.ownerId, ownerId));
+        await tx.delete(sales).where(eq(sales.ownerId, userId));
+        await tx.delete(products).where(eq(products.ownerId, userId));
+        await tx.delete(customers).where(eq(customers.ownerId, userId));
+        await tx.delete(categories).where(eq(categories.ownerId, userId));
+        await tx.delete(businessSettings).where(eq(businessSettings.ownerId, userId));
 
         if (data.businessSettings) {
-          await tx.insert(businessSettings).values({ ...data.businessSettings, ownerId });
+          await tx.insert(businessSettings).values({ ...data.businessSettings, ownerId: userId });
         }
 
         if (data.categories.length > 0) {
           await tx.insert(categories).values(
-            data.categories.map((c: any) => ({ ...c, ownerId }))
+            data.categories.map((c: any) => ({ ...c, ownerId: userId, tenantId }))
           );
         }
 
         if (data.products.length > 0) {
           await tx.insert(products).values(
-            data.products.map((p: any) => ({ ...p, ownerId }))
+            data.products.map((p: any) => ({ ...p, ownerId: userId, tenantId }))
           );
         }
 
         if (data.customers.length > 0) {
           await tx.insert(customers).values(
-            data.customers.map((c: any) => ({ ...c, ownerId }))
+            data.customers.map((c: any) => ({ ...c, ownerId: userId, tenantId }))
           );
         }
 
         if (data.sales.length > 0) {
           await tx.insert(sales).values(
-            data.sales.map((s: any) => ({ ...s, ownerId, userId: ownerId }))
+            data.sales.map((s: any) => ({ ...s, ownerId: userId, userId, tenantId }))
           );
         }
 
@@ -136,7 +137,7 @@ export function registerBackupRoutes(app: Express): void {
 
         if (data.stockMovements.length > 0) {
           await tx.insert(stockMovements).values(
-            data.stockMovements.map((m: any) => ({ ...m, ownerId, userId: ownerId }))
+            data.stockMovements.map((m: any) => ({ ...m, ownerId: userId, userId, tenantId }))
           );
         }
       });

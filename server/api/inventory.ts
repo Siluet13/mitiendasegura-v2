@@ -1,7 +1,8 @@
 import type { Express } from "express";
-import { eq, and, desc, lte, sql } from "drizzle-orm";
+import { eq, and, or, isNull, desc, sql } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
+import { requireTenant } from "../lib/context";
 import {
   categories,
   products,
@@ -11,52 +12,64 @@ import {
   stockMovements,
 } from "@shared/schema";
 
+function scopeWhere(
+  tenantCol: any,
+  ownerCol: any,
+  tenantId: string | null,
+  userId: string,
+) {
+  if (tenantId) {
+    return or(eq(tenantCol, tenantId), and(isNull(tenantCol), eq(ownerCol, userId)));
+  }
+  return eq(ownerCol, userId);
+}
+
 export function registerInventoryRoutes(app: Express): void {
   // ── Categories ────────────────────────────────────────────────────────────
-  app.get("/api/categories", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.get("/api/categories", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const rows = await db
       .select()
       .from(categories)
-      .where(eq(categories.ownerId, ownerId))
+      .where(scopeWhere(categories.tenantId, categories.ownerId, tenantId, userId))
       .orderBy(categories.nombre);
     res.json(rows);
   });
 
-  app.post("/api/categories", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.post("/api/categories", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const { nombre } = req.body;
     if (!nombre) return res.status(400).json({ message: "nombre requerido" });
     const [row] = await db
       .insert(categories)
-      .values({ ownerId, nombre })
+      .values({ ownerId: userId, tenantId, nombre })
       .returning();
     res.json(row);
   });
 
-  app.put("/api/categories/:id", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.put("/api/categories/:id", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const { nombre } = req.body;
     const [row] = await db
       .update(categories)
-      .set({ nombre, updatedAt: new Date() })
-      .where(and(eq(categories.id, req.params.id), eq(categories.ownerId, ownerId)))
+      .set({ nombre, tenantId: tenantId ?? undefined, updatedAt: new Date() })
+      .where(and(eq(categories.id, req.params.id), scopeWhere(categories.tenantId, categories.ownerId, tenantId, userId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
     res.json(row);
   });
 
-  app.delete("/api/categories/:id", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.delete("/api/categories/:id", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     await db
       .delete(categories)
-      .where(and(eq(categories.id, req.params.id), eq(categories.ownerId, ownerId)));
+      .where(and(eq(categories.id, req.params.id), scopeWhere(categories.tenantId, categories.ownerId, tenantId, userId)));
     res.json({ ok: true });
   });
 
   // ── Products ──────────────────────────────────────────────────────────────
-  app.get("/api/products", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.get("/api/products", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const rows = await db
       .select({
         id: products.id,
@@ -77,18 +90,19 @@ export function registerInventoryRoutes(app: Express): void {
       })
       .from(products)
       .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(eq(products.ownerId, ownerId))
+      .where(scopeWhere(products.tenantId, products.ownerId, tenantId, userId))
       .orderBy(products.nombre);
     res.json(rows.map((r) => ({ ...r, categories: r.categoryNombre ? { nombre: r.categoryNombre } : null })));
   });
 
-  app.post("/api/products", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.post("/api/products", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const body = req.body;
     const [row] = await db
       .insert(products)
       .values({
-        ownerId,
+        ownerId: userId,
+        tenantId,
         nombre: body.nombre,
         descripcion: body.descripcion ?? null,
         sku: body.sku ?? null,
@@ -104,8 +118,8 @@ export function registerInventoryRoutes(app: Express): void {
     res.json(toProductResponse(row));
   });
 
-  app.put("/api/products/:id", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.put("/api/products/:id", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const body = req.body;
     const [row] = await db
       .update(products)
@@ -120,40 +134,42 @@ export function registerInventoryRoutes(app: Express): void {
         stockMinimo: body.stock_minimo ?? 0,
         categoryId: body.category_id ?? null,
         activo: body.activo ?? true,
+        tenantId: tenantId ?? undefined,
         updatedAt: new Date(),
       })
-      .where(and(eq(products.id, req.params.id), eq(products.ownerId, ownerId)))
+      .where(and(eq(products.id, req.params.id), scopeWhere(products.tenantId, products.ownerId, tenantId, userId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
     res.json(toProductResponse(row));
   });
 
-  app.delete("/api/products/:id", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.delete("/api/products/:id", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     await db
       .delete(products)
-      .where(and(eq(products.id, req.params.id), eq(products.ownerId, ownerId)));
+      .where(and(eq(products.id, req.params.id), scopeWhere(products.tenantId, products.ownerId, tenantId, userId)));
     res.json({ ok: true });
   });
 
   // ── Customers ─────────────────────────────────────────────────────────────
-  app.get("/api/customers", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.get("/api/customers", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const rows = await db
       .select()
       .from(customers)
-      .where(eq(customers.ownerId, ownerId))
+      .where(scopeWhere(customers.tenantId, customers.ownerId, tenantId, userId))
       .orderBy(customers.nombre);
     res.json(rows);
   });
 
-  app.post("/api/customers", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.post("/api/customers", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const body = req.body;
     const [row] = await db
       .insert(customers)
       .values({
-        ownerId,
+        ownerId: userId,
+        tenantId,
         nombre: body.nombre,
         telefono: body.telefono ?? null,
         email: body.email ?? null,
@@ -164,8 +180,8 @@ export function registerInventoryRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.put("/api/customers/:id", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.put("/api/customers/:id", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const body = req.body;
     const [row] = await db
       .update(customers)
@@ -175,38 +191,39 @@ export function registerInventoryRoutes(app: Express): void {
         email: body.email ?? null,
         direccion: body.direccion ?? null,
         observaciones: body.observaciones ?? null,
+        tenantId: tenantId ?? undefined,
       })
-      .where(and(eq(customers.id, req.params.id), eq(customers.ownerId, ownerId)))
+      .where(and(eq(customers.id, req.params.id), scopeWhere(customers.tenantId, customers.ownerId, tenantId, userId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
     res.json(row);
   });
 
-  app.delete("/api/customers/:id", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.delete("/api/customers/:id", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     await db
       .delete(customers)
-      .where(and(eq(customers.id, req.params.id), eq(customers.ownerId, ownerId)));
+      .where(and(eq(customers.id, req.params.id), scopeWhere(customers.tenantId, customers.ownerId, tenantId, userId)));
     res.json({ ok: true });
   });
 
   // ── Sales ─────────────────────────────────────────────────────────────────
-  app.get("/api/sales", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.get("/api/sales", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const rows = await db
       .select()
       .from(sales)
-      .where(eq(sales.ownerId, ownerId))
+      .where(scopeWhere(sales.tenantId, sales.ownerId, tenantId, userId))
       .orderBy(desc(sales.createdAt));
     res.json(rows);
   });
 
-  app.get("/api/sales/:id", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.get("/api/sales/:id", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const [sale] = await db
       .select()
       .from(sales)
-      .where(and(eq(sales.id, req.params.id), eq(sales.ownerId, ownerId)));
+      .where(and(eq(sales.id, req.params.id), scopeWhere(sales.tenantId, sales.ownerId, tenantId, userId)));
     if (!sale) return res.status(404).json({ message: "No encontrado" });
 
     const items = await db
@@ -234,9 +251,8 @@ export function registerInventoryRoutes(app: Express): void {
     });
   });
 
-  app.post("/api/sales", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
-    const userId = ownerId;
+  app.post("/api/sales", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const { items, observacion, customer_id } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -247,13 +263,13 @@ export function registerInventoryRoutes(app: Express): void {
       const [cust] = await db
         .select()
         .from(customers)
-        .where(and(eq(customers.id, customer_id), eq(customers.ownerId, ownerId)));
+        .where(and(eq(customers.id, customer_id), scopeWhere(customers.tenantId, customers.ownerId, tenantId, userId)));
       if (!cust) return res.status(400).json({ message: "Cliente no encontrado" });
     }
 
     const [newSale] = await db
       .insert(sales)
-      .values({ ownerId, userId, total: "0", observacion: observacion ?? null, customerId: customer_id ?? null })
+      .values({ ownerId: userId, tenantId, userId, total: "0", observacion: observacion ?? null, customerId: customer_id ?? null })
       .returning();
 
     let total = 0;
@@ -271,7 +287,7 @@ export function registerInventoryRoutes(app: Express): void {
       const [prod] = await db
         .select()
         .from(products)
-        .where(and(eq(products.id, product_id), eq(products.ownerId, ownerId)));
+        .where(and(eq(products.id, product_id), scopeWhere(products.tenantId, products.ownerId, tenantId, userId)));
       if (!prod) return res.status(400).json({ message: `Producto no encontrado: ${product_id}` });
 
       if (prod.stock - cantidad < 0) {
@@ -296,7 +312,8 @@ export function registerInventoryRoutes(app: Express): void {
         .where(eq(products.id, product_id));
 
       await db.insert(stockMovements).values({
-        ownerId,
+        ownerId: userId,
+        tenantId,
         userId,
         productId: product_id,
         tipo: "salida",
@@ -312,9 +329,14 @@ export function registerInventoryRoutes(app: Express): void {
   });
 
   // ── Stock Movements ───────────────────────────────────────────────────────
-  app.get("/api/stock-movements", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
-    const productId = req.query.productId as string | undefined;
+  app.get("/api/stock-movements", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
+    const productId = (req as any).query.productId as string | undefined;
+
+    const baseWhere = scopeWhere(stockMovements.tenantId, stockMovements.ownerId, tenantId, userId);
+    const where = productId
+      ? and(baseWhere, eq(stockMovements.productId, productId))
+      : baseWhere;
 
     const rows = await db
       .select({
@@ -333,11 +355,7 @@ export function registerInventoryRoutes(app: Express): void {
       })
       .from(stockMovements)
       .leftJoin(products, eq(stockMovements.productId, products.id))
-      .where(
-        productId
-          ? and(eq(stockMovements.ownerId, ownerId), eq(stockMovements.productId, productId))
-          : eq(stockMovements.ownerId, ownerId)
-      )
+      .where(where)
       .orderBy(desc(stockMovements.createdAt));
 
     res.json(
@@ -348,9 +366,8 @@ export function registerInventoryRoutes(app: Express): void {
     );
   });
 
-  app.post("/api/stock-movements", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
-    const userId = ownerId;
+  app.post("/api/stock-movements", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
     const { product_id, tipo, cantidad, observacion } = req.body;
 
     if (!product_id || !tipo || !cantidad || cantidad <= 0) {
@@ -360,7 +377,7 @@ export function registerInventoryRoutes(app: Express): void {
     const [prod] = await db
       .select()
       .from(products)
-      .where(and(eq(products.id, product_id), eq(products.ownerId, ownerId)));
+      .where(and(eq(products.id, product_id), scopeWhere(products.tenantId, products.ownerId, tenantId, userId)));
     if (!prod) return res.status(400).json({ message: "Producto no encontrado" });
 
     if (tipo === "salida" && prod.stock - cantidad < 0) {
@@ -369,7 +386,7 @@ export function registerInventoryRoutes(app: Express): void {
 
     const [mv] = await db
       .insert(stockMovements)
-      .values({ ownerId, userId, productId: product_id, tipo, cantidad, observacion: observacion ?? null })
+      .values({ ownerId: userId, tenantId, userId, productId: product_id, tipo, cantidad, observacion: observacion ?? null })
       .returning();
 
     const newStock = tipo === "entrada" ? prod.stock + cantidad : prod.stock - cantidad;

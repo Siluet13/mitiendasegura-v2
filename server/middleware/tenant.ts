@@ -14,9 +14,9 @@ export const resolveTenant: RequestHandler = async (req, _res, next) => {
       .select({ tenantId: profiles.tenantId })
       .from(profiles)
       .where(eq(profiles.id, userId));
-    (req as any).tenantId = profile?.tenantId ?? userId;
+    (req as any).tenantId = profile?.tenantId ?? null;
   } catch {
-    (req as any).tenantId = userId;
+    (req as any).tenantId = null;
   }
   next();
 };

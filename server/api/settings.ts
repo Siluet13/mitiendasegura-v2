@@ -2,26 +2,27 @@ import type { Express } from "express";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
+import { requireTenant } from "../lib/context";
 import { businessSettings } from "@shared/schema";
 
 export function registerSettingsRoutes(app: Express): void {
-  app.get("/api/settings", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.get("/api/settings", isAuthenticated, async (req, res) => {
+    const { userId } = requireTenant(req);
     const [row] = await db
       .select()
       .from(businessSettings)
-      .where(eq(businessSettings.ownerId, ownerId));
+      .where(eq(businessSettings.ownerId, userId));
     res.json(row ?? null);
   });
 
-  app.put("/api/settings", isAuthenticated, async (req: any, res) => {
-    const ownerId = req.user.claims.sub;
+  app.put("/api/settings", isAuthenticated, async (req, res) => {
+    const { userId } = requireTenant(req);
     const body = req.body;
 
     const [row] = await db
       .insert(businessSettings)
       .values({
-        ownerId,
+        ownerId: userId,
         nombreNegocio: body.nombre_negocio,
         razonSocial: body.razon_social ?? null,
         telefono: body.telefono ?? null,
