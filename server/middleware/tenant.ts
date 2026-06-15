@@ -9,6 +9,7 @@ export const resolveTenant: RequestHandler = async (req, _res, next) => {
     return next();
   }
   const userId: string = user.claims.sub;
+  (req as any).userId = userId;
   try {
     const [profile] = await db
       .select({ tenantId: profiles.tenantId })
