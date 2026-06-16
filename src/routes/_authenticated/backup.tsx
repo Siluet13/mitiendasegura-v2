@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { exportBackup, restoreBackup, parseBackupFile } from "@/lib/api/backup";
 import type { BackupPayload } from "@/lib/api/backup";
 import { toast } from "sonner";
-import { AlertTriangle, Download, RotateCcw, Upload } from "lucide-react";
+import { AlertCircle, AlertTriangle, Download, RotateCcw, Upload } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/backup")({
   head: () => ({ meta: [{ title: "Backup y Restauración" }] }),
@@ -15,6 +16,7 @@ export const Route = createFileRoute("/_authenticated/backup")({
 });
 
 function BackupPage() {
+  const { user } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -69,6 +71,8 @@ function BackupPage() {
       setRestoring(false);
     }
   }
+
+  const isCrossAccount = !!(user && pending?.ownerId && pending.ownerId !== user.id);
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -131,12 +135,30 @@ function BackupPage() {
           {pending && (
             <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
               <div className="text-sm font-medium">Vista previa del backup:</div>
+
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <span className="text-muted-foreground">Exportado el:</span>
                 <span>{new Date(pending.exportedAt).toLocaleString("es-AR")}</span>
                 <span className="text-muted-foreground">Versión:</span>
                 <span>{pending.version}</span>
+                {pending.app && (
+                  <>
+                    <span className="text-muted-foreground">Aplicación:</span>
+                    <span>{pending.app}</span>
+                  </>
+                )}
               </div>
+
+              {isCrossAccount && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    Este backup fue creado por otra cuenta. Los datos se restaurarán en tu cuenta
+                    actual, sobreescribiendo tus datos existentes.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="flex flex-wrap gap-2 mt-1">
                 <Badge variant="secondary">{pending.stats.products} productos</Badge>
                 <Badge variant="secondary">{pending.stats.categories} categorías</Badge>
@@ -144,6 +166,7 @@ function BackupPage() {
                 <Badge variant="secondary">{pending.stats.sales} ventas</Badge>
                 <Badge variant="secondary">{pending.stats.stockMovements} movimientos</Badge>
               </div>
+
               <label className="flex items-center gap-2 text-sm cursor-pointer select-none mt-2">
                 <input
                   type="checkbox"

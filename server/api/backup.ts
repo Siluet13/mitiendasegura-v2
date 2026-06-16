@@ -40,8 +40,10 @@ export function registerBackupRoutes(app: Express): void {
 
     const payload = {
       version: "1.0",
+      app: "Mi Tienda Segura",
       exportedAt: new Date().toISOString(),
       ownerId: userId,
+      tenantId,
       data: {
         businessSettings: bsData[0] ?? null,
         categories: catsData,
@@ -88,6 +90,17 @@ export function registerBackupRoutes(app: Express): void {
       !Array.isArray(data.stockMovements)
     ) {
       return res.status(400).json({ message: "Estructura de datos inválida" });
+    }
+
+    const totalRows =
+      data.categories.length +
+      data.products.length +
+      data.customers.length +
+      data.sales.length +
+      data.saleItems.length +
+      data.stockMovements.length;
+    if (totalRows === 0 && !data.businessSettings) {
+      return res.status(400).json({ message: "El backup está vacío. No se realizó ninguna restauración." });
     }
 
     try {

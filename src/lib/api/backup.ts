@@ -22,8 +22,10 @@ export interface BackupStats {
 
 export interface BackupPayload {
   version: string;
+  app?: string;
   exportedAt: string;
   ownerId: string;
+  tenantId?: string;
   data: {
     businessSettings: unknown;
     categories: unknown[];
@@ -59,13 +61,45 @@ export function parseBackupFile(file: File): Promise<BackupPayload> {
     reader.onload = (e) => {
       try {
         const json = JSON.parse(e.target?.result as string);
+
         if (!json?.version || !json?.data) {
-          reject(new Error("Archivo de backup inválido"));
+          reject(new Error("Archivo de backup inválido: faltan campos obligatorios (version, data)"));
           return;
         }
+
+        const d = json.data;
+        if (
+          !Array.isArray(d.categories) ||
+          !Array.isArray(d.products) ||
+          !Array.isArray(d.customers) ||
+          !Array.isArray(d.sales) ||
+          !Array.isArray(d.saleItems) ||
+          !Array.isArray(d.stockMovements)
+        ) {
+          reject(new Error("El backup tiene una estructura de datos inválida"));
+          return;
+        }
+
+        if (json.exportedAt && isNaN(Date.parse(json.exportedAt))) {
+          reject(new Error("El backup tiene una fecha de exportación inválida"));
+          return;
+        }
+
+        const totalItems =
+          d.categories.length +
+          d.products.length +
+          d.customers.length +
+          d.sales.length +
+          d.saleItems.length +
+          d.stockMovements.length;
+        if (totalItems === 0 && !d.businessSettings) {
+          reject(new Error("El backup está vacío y no contiene datos para restaurar"));
+          return;
+        }
+
         resolve(json as BackupPayload);
       } catch {
-        reject(new Error("No se pudo leer el archivo JSON"));
+        reject(new Error("No se pudo leer el archivo. Verificá que sea un JSON válido"));
       }
     };
     reader.onerror = () => reject(new Error("Error al leer el archivo"));
