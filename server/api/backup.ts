@@ -11,7 +11,10 @@ import {
   saleItems,
   stockMovements,
   businessSettings,
+  licenses,
 } from "@shared/schema";
+
+const MAX_RESTORE_ROWS = 100_000;
 
 function noTenant(res: any) {
   return res.status(500).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
@@ -22,12 +25,13 @@ export function registerBackupRoutes(app: Express): void {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
 
-    const [bsData, catsData, prodsData, custsData, salesData] = await Promise.all([
+    const [bsData, catsData, prodsData, custsData, salesData, licData] = await Promise.all([
       db.select().from(businessSettings).where(eq(businessSettings.ownerId, userId)),
       db.select().from(categories).where(eq(categories.tenantId, tenantId)),
       db.select().from(products).where(eq(products.tenantId, tenantId)),
       db.select().from(customers).where(eq(customers.tenantId, tenantId)),
       db.select().from(sales).where(eq(sales.tenantId, tenantId)),
+      db.select().from(licenses).where(eq(licenses.ownerId, userId)),
     ]);
 
     const saleIds = salesData.map((s) => s.id);
@@ -52,6 +56,7 @@ export function registerBackupRoutes(app: Express): void {
         sales: salesData,
         saleItems: saleItemsData,
         stockMovements: stockData,
+        license: licData[0] ?? null,
       },
       stats: {
         categories: catsData.length,
@@ -75,8 +80,16 @@ export function registerBackupRoutes(app: Express): void {
     if (!tenantId) return noTenant(res);
     const body = req.body;
 
+    if (body.confirmRestore !== true) {
+      return res.status(400).json({ message: "Se requiere confirmación explícita para restaurar (confirmRestore: true)." });
+    }
+
     if (!body?.version || !body?.data) {
       return res.status(400).json({ message: "Formato de backup inválido" });
+    }
+
+    if (body.exportedAt && isNaN(Date.parse(body.exportedAt))) {
+      return res.status(400).json({ message: "La fecha de exportación del backup es inválida." });
     }
 
     const { data } = body;
@@ -99,8 +112,15 @@ export function registerBackupRoutes(app: Express): void {
       data.sales.length +
       data.saleItems.length +
       data.stockMovements.length;
+
     if (totalRows === 0 && !data.businessSettings) {
       return res.status(400).json({ message: "El backup está vacío. No se realizó ninguna restauración." });
+    }
+
+    if (totalRows > MAX_RESTORE_ROWS) {
+      return res.status(400).json({
+        message: `El backup supera el límite de ${MAX_RESTORE_ROWS.toLocaleString("es-AR")} registros (${totalRows.toLocaleString("es-AR")} encontrados). Contactá soporte.`,
+      });
     }
 
     try {
@@ -158,6 +178,32 @@ export function registerBackupRoutes(app: Express): void {
           await tx.insert(stockMovements).values(
             data.stockMovements.map((m: any) => ({ ...m, ownerId: userId, userId, tenantId }))
           );
+        }
+
+        if (data.license) {
+          const lic = data.license as any;
+          await tx
+            .insert(licenses)
+            .values({
+              id: lic.id,
+              ownerId: userId,
+              status: lic.status ?? "pendiente",
+              activatedAt: lic.activatedAt ? new Date(lic.activatedAt) : null,
+              expiresAt: lic.expiresAt ? new Date(lic.expiresAt) : null,
+              suspendedAt: lic.suspendedAt ? new Date(lic.suspendedAt) : null,
+              notes: lic.notes ?? null,
+            })
+            .onConflictDoUpdate({
+              target: licenses.ownerId,
+              set: {
+                status: lic.status ?? "pendiente",
+                activatedAt: lic.activatedAt ? new Date(lic.activatedAt) : null,
+                expiresAt: lic.expiresAt ? new Date(lic.expiresAt) : null,
+                suspendedAt: lic.suspendedAt ? new Date(lic.suspendedAt) : null,
+                notes: lic.notes ?? null,
+                updatedAt: new Date(),
+              },
+            });
         }
       });
 

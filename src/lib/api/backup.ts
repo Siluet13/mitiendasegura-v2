@@ -1,3 +1,5 @@
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...options,
@@ -34,29 +36,44 @@ export interface BackupPayload {
     sales: unknown[];
     saleItems: unknown[];
     stockMovements: unknown[];
+    license?: unknown;
   };
   stats: BackupStats;
 }
 
-export async function exportBackup(): Promise<void> {
+export async function exportBackup(): Promise<{ size: number; filename: string }> {
   const res = await fetch("/api/backup/export", { credentials: "include" });
   if (!res.ok) throw new Error("Error al exportar el backup");
   const blob = await res.blob();
   const date = new Date().toISOString().slice(0, 10);
+  const filename = `backup_${date}.json`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `backup_${date}.json`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+  return { size: blob.size, filename };
 }
 
 export async function restoreBackup(payload: BackupPayload): Promise<{ ok: boolean; stats: BackupStats }> {
-  return apiFetch("/api/backup/restore", { method: "POST", body: JSON.stringify(payload) });
+  return apiFetch("/api/backup/restore", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, confirmRestore: true }),
+  });
 }
 
 export function parseBackupFile(file: File): Promise<BackupPayload> {
   return new Promise((resolve, reject) => {
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      reject(
+        new Error(
+          `El archivo supera el límite de 50 MB (${(file.size / 1024 / 1024).toFixed(1)} MB)`
+        )
+      );
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -64,6 +81,11 @@ export function parseBackupFile(file: File): Promise<BackupPayload> {
 
         if (!json?.version || !json?.data) {
           reject(new Error("Archivo de backup inválido: faltan campos obligatorios (version, data)"));
+          return;
+        }
+
+        if (typeof json.version !== "string") {
+          reject(new Error("El backup tiene un campo 'version' con formato incorrecto"));
           return;
         }
 
