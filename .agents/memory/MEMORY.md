@@ -2,4 +2,4 @@
 - [Dashboard N+1 Fix](dashboard-n1-fix.md) — recent-sales and top-products had N+1 / full-table JS aggregation; replaced with JOIN+COUNT and SQL GROUP BY in dashboard.ts.
 - [PWA Removed](pwa-removed.md) — vite-plugin-pwa was fully removed (caused stale SW serving offline.html); icons remain in public/icons/ but no SW, no manifest, no offline.html.
 - [Panel Maestro & Healthcheck](admin-healthcheck.md) — /admin route exists but had no sidebar link (added); /health endpoint added to server/index.ts for Replit Deploy healthcheck.
-- [SaaS Foundation](saas-foundation.md) — tenants+profiles tables added; nullable tenant_id in 5 inventory tables; server/lib/context.ts centralizes user/tenant helpers.
+- [SaaS Foundation](saas-foundation.md) — tenants+profiles tables added; tenant_id NOT NULL + indexed on 5 inventory tables; migrations/ baseline created; server/lib/context.ts centralizes user/tenant helpers.

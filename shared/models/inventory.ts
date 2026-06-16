@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  index,
   integer,
   numeric,
   pgEnum,
@@ -16,16 +17,18 @@ export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["entrada", "
 export const categories = pgTable("categories", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
-  tenantId: uuid("tenant_id"),
+  tenantId: uuid("tenant_id").notNull(),
   nombre: text("nombre").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("categories_tenant_id_idx").on(t.tenantId),
+]);
 
 export const products = pgTable("products", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
-  tenantId: uuid("tenant_id"),
+  tenantId: uuid("tenant_id").notNull(),
   categoryId: uuid("category_id").references(() => categories.id, { onDelete: "set null" }),
   nombre: text("nombre").notNull(),
   descripcion: text("descripcion"),
@@ -38,30 +41,36 @@ export const products = pgTable("products", {
   activo: boolean("activo").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("products_tenant_id_idx").on(t.tenantId),
+]);
 
 export const customers = pgTable("customers", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
-  tenantId: uuid("tenant_id"),
+  tenantId: uuid("tenant_id").notNull(),
   nombre: text("nombre").notNull(),
   telefono: text("telefono"),
   email: text("email"),
   direccion: text("direccion"),
   observaciones: text("observaciones"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("customers_tenant_id_idx").on(t.tenantId),
+]);
 
 export const sales = pgTable("sales", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
-  tenantId: uuid("tenant_id"),
+  tenantId: uuid("tenant_id").notNull(),
   userId: varchar("user_id").notNull(),
   customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
   total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
   observacion: text("observacion"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("sales_tenant_id_idx").on(t.tenantId),
+]);
 
 export const saleItems = pgTable("sale_items", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -76,7 +85,7 @@ export const saleItems = pgTable("sale_items", {
 export const stockMovements = pgTable("stock_movements", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull(),
-  tenantId: uuid("tenant_id"),
+  tenantId: uuid("tenant_id").notNull(),
   userId: varchar("user_id").notNull(),
   productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
   tipo: stockMovementTypeEnum("tipo").notNull(),
@@ -85,7 +94,9 @@ export const stockMovements = pgTable("stock_movements", {
   referenciaTipo: text("referencia_tipo"),
   referenciaId: uuid("referencia_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("stock_movements_tenant_id_idx").on(t.tenantId),
+]);
 
 export const businessSettings = pgTable("business_settings", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
