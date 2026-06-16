@@ -6,10 +6,11 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 
 function NotFoundComponent() {
   return (
@@ -81,6 +82,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      { rel: "manifest", href: "/manifest.json" },
       { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
       { rel: "icon", type: "image/svg+xml", href: "/icons/icon.svg" },
       { rel: "icon", type: "image/png", sizes: "192x192", href: "/icons/icon-192.png" },
@@ -106,13 +108,45 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function OfflineBanner() {
+  const isOnline = useOnlineStatus();
+  if (isOnline) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        background: "#374151",
+        color: "#f9fafb",
+        textAlign: "center",
+        padding: "6px 16px",
+        fontSize: "13px",
+        zIndex: 9999,
+      }}
+    >
+      Sin conexión — los datos se mostrarán cuando vuelvas a estar en línea
+    </div>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
       <Toaster />
+      <OfflineBanner />
     </QueryClientProvider>
   );
 }
