@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Trash2, Eye, User } from "lucide-react";
+import { Plus, Trash2, Eye, User, WifiOff } from "lucide-react";
 import {
   createSale,
   getSaleWithItems,
@@ -15,6 +15,9 @@ import {
   type Customer,
   type Product,
 } from "@/lib/api/inventory";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useReconnect } from "@/hooks/useReconnect";
+import { enqueue } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +42,10 @@ export const Route = createFileRoute("/_authenticated/sales")({
   component: SalesPage,
 });
 
+function syncPendingSales() {
+  // Fase 2 POS offline: sincronizar ventas pendientes al servidor
+}
+
 const obsSchema = z.string().trim().max(500).optional().or(z.literal(""));
 const NO_CUSTOMER = "__none__";
 
@@ -59,6 +66,7 @@ function Kbd({ children }: { children: React.ReactNode }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 function SalesPage() {
   const qc = useQueryClient();
+  useReconnect(syncPendingSales);
   const [open, setOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
 
@@ -213,6 +221,8 @@ function NewSaleDialog({
     return m;
   }, [products]);
 
+  const isOnline = useOnlineStatus();
+
   const available = useMemo(
     () => products.filter((p) => p.activo && !lines.some((l) => l.product_id === p.id)),
     [products, lines],
@@ -324,19 +334,38 @@ function NewSaleDialog({
   const mut = useMutation({
     mutationFn: async (values: { observacion?: string }) => {
       if (lines.length === 0) throw new Error("La venta no puede estar vacía");
-      return createSale({
+      const saleInput = {
         items: lines,
         observacion: values.observacion?.trim() ? values.observacion : null,
         customer_id: customerId !== NO_CUSTOMER ? customerId : null,
-      });
+      };
+      if (!navigator.onLine) {
+        await enqueue("sale", {
+          ...saleInput,
+          items_snapshot: lines.map((l) => ({
+            product_id: l.product_id,
+            cantidad: l.cantidad,
+            nombre: productMap.get(l.product_id)?.nombre ?? null,
+            precioUnitario: productMap.get(l.product_id)?.precio ?? null,
+          })),
+          total,
+        });
+        return { offline: true as const };
+      }
+      await createSale(saleInput);
+      return { offline: false as const };
     },
-    onSuccess: () => {
-      toast.success("Venta registrada");
+    onSuccess: ({ offline }) => {
+      if (offline) {
+        toast.info("Venta guardada localmente. Se sincronizará cuando vuelva la conexión.");
+      } else {
+        toast.success("Venta registrada");
+        onCreated();
+      }
       setLines([]);
       setCustomerId(NO_CUSTOMER);
       form.reset({ observacion: "" });
       onOpenChange(false);
-      onCreated();
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -534,6 +563,13 @@ function NewSaleDialog({
             <Label htmlFor="observacion">Observación</Label>
             <Textarea id="observacion" rows={2} {...form.register("observacion")} />
           </div>
+
+          {!isOnline && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-600">
+              <WifiOff className="h-3 w-3" />
+              Sin conexión — la venta se guardará localmente
+            </p>
+          )}
 
           <DialogFooter className="shrink-0">
             <Button
