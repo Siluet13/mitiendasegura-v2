@@ -7,7 +7,8 @@ export interface PendingOp {
   type: string;
   payload: unknown;
   timestamp: number;
-  status: "pending" | "processing" | "failed";
+  status: "pending" | "processing";
+  processingAt?: number;
 }
 
 export const PENDING_OPS_STORE = STORE;

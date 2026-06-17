@@ -15,7 +15,7 @@ import {
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useReconnect } from "@/hooks/useReconnect";
-import { enqueue, listPending, dequeue } from "@/lib/offline/queue";
+import { enqueue, listPending, dequeue, updateStatus, requeueProcessingOlderThan, isNetworkError } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +63,8 @@ export async function syncPendingCategories(qc: QueryClient): Promise<void> {
 
   let toastId: string | number | undefined;
   try {
+    await requeueProcessingOlderThan(10);
+
     const pending = await listPending();
     const categoryPending = pending.filter((op) => op.type === "category_create");
 
@@ -77,11 +79,13 @@ export async function syncPendingCategories(qc: QueryClient): Promise<void> {
 
     for (const op of categoryPending) {
       if (op.id == null) continue;
+      await updateStatus(op.id, "processing");
       try {
         await createCategory(op.payload as { nombre: string });
         await dequeue(op.id);
         synced++;
       } catch {
+        await updateStatus(op.id, "pending");
         failed++;
       }
     }
@@ -151,7 +155,15 @@ function CategoriesPage() {
         await enqueue("category_create", values);
         return null;
       }
-      return createCategory(values);
+      try {
+        return await createCategory(values);
+      } catch (e) {
+        if (isNetworkError(e)) {
+          await enqueue("category_create", values);
+          return null;
+        }
+        throw e;
+      }
     },
     onSuccess: (result) => {
       if (result === null) {

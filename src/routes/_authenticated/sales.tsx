@@ -18,7 +18,7 @@ import {
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useReconnect } from "@/hooks/useReconnect";
-import { enqueue, listPending, dequeue } from "@/lib/offline/queue";
+import { enqueue, listPending, dequeue, updateStatus, requeueProcessingOlderThan, isNetworkError } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,6 +57,8 @@ export async function syncPendingSales(qc: QueryClient): Promise<void> {
 
   let toastId: string | number | undefined;
   try {
+    await requeueProcessingOlderThan(10);
+
     const pending = await listPending();
     const salePending = pending.filter((op) => op.type === "sale");
 
@@ -73,6 +75,7 @@ export async function syncPendingSales(qc: QueryClient): Promise<void> {
 
     for (const op of salePending) {
       if (op.id == null) continue;
+      await updateStatus(op.id, "processing");
       const payload = op.payload as OfflineSalePayload;
       try {
         await createSale({
@@ -83,6 +86,7 @@ export async function syncPendingSales(qc: QueryClient): Promise<void> {
         await dequeue(op.id);
         synced++;
       } catch {
+        await updateStatus(op.id, "pending");
         failed++;
       }
     }
@@ -410,21 +414,30 @@ function NewSaleDialog({
         observacion: values.observacion?.trim() ? values.observacion : null,
         customer_id: customerId !== NO_CUSTOMER ? customerId : null,
       };
-      if (!navigator.onLine) {
-        await enqueue("sale", {
-          ...saleInput,
-          items_snapshot: lines.map((l) => ({
-            product_id: l.product_id,
-            cantidad: l.cantidad,
-            nombre: productMap.get(l.product_id)?.nombre ?? null,
-            precioUnitario: productMap.get(l.product_id)?.precio ?? null,
-          })),
-          total,
-        });
+      const offlinePayload = {
+        ...saleInput,
+        items_snapshot: lines.map((l) => ({
+          product_id: l.product_id,
+          cantidad: l.cantidad,
+          nombre: productMap.get(l.product_id)?.nombre ?? null,
+          precioUnitario: productMap.get(l.product_id)?.precio ?? null,
+        })),
+        total,
+      };
+      if (!isOnline) {
+        await enqueue("sale", offlinePayload);
         return { offline: true as const };
       }
-      await createSale(saleInput);
-      return { offline: false as const };
+      try {
+        await createSale(saleInput);
+        return { offline: false as const };
+      } catch (e) {
+        if (isNetworkError(e)) {
+          await enqueue("sale", offlinePayload);
+          return { offline: true as const };
+        }
+        throw e;
+      }
     },
     onSuccess: ({ offline }) => {
       if (offline) {

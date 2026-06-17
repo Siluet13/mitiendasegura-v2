@@ -17,7 +17,7 @@ import {
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useReconnect } from "@/hooks/useReconnect";
-import { enqueue, listPending, dequeue } from "@/lib/offline/queue";
+import { enqueue, listPending, dequeue, updateStatus, requeueProcessingOlderThan, isNetworkError } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -81,6 +81,8 @@ export async function syncPendingProducts(qc: QueryClient): Promise<void> {
 
   let toastId: string | number | undefined;
   try {
+    await requeueProcessingOlderThan(10);
+
     const pending = await listPending();
     const productPending = pending.filter((op) => op.type === "product_create");
 
@@ -95,11 +97,13 @@ export async function syncPendingProducts(qc: QueryClient): Promise<void> {
 
     for (const op of productPending) {
       if (op.id == null) continue;
+      await updateStatus(op.id, "processing");
       try {
         await createProduct(op.payload as ProductInput);
         await dequeue(op.id);
         synced++;
       } catch {
+        await updateStatus(op.id, "pending");
         failed++;
       }
     }
@@ -209,7 +213,15 @@ function ProductsPage() {
         await enqueue("product_create", payload);
         return null;
       }
-      return createProduct(payload);
+      try {
+        return await createProduct(payload);
+      } catch (e) {
+        if (isNetworkError(e)) {
+          await enqueue("product_create", payload);
+          return null;
+        }
+        throw e;
+      }
     },
     onSuccess: (result) => {
       if (result === null) {

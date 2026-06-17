@@ -16,7 +16,7 @@ import {
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useReconnect } from "@/hooks/useReconnect";
-import { enqueue, listPending, dequeue } from "@/lib/offline/queue";
+import { enqueue, listPending, dequeue, updateStatus, requeueProcessingOlderThan, isNetworkError } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -87,6 +87,8 @@ export async function syncPendingCustomers(qc: QueryClient): Promise<void> {
 
   let toastId: string | number | undefined;
   try {
+    await requeueProcessingOlderThan(10);
+
     const pending = await listPending();
     const customerPending = pending.filter((op) => op.type === "customer_create");
 
@@ -101,11 +103,13 @@ export async function syncPendingCustomers(qc: QueryClient): Promise<void> {
 
     for (const op of customerPending) {
       if (op.id == null) continue;
+      await updateStatus(op.id, "processing");
       try {
         await createCustomer(op.payload as CustomerInput);
         await dequeue(op.id);
         synced++;
       } catch {
+        await updateStatus(op.id, "pending");
         failed++;
       }
     }
@@ -200,7 +204,15 @@ function CustomersPage() {
         await enqueue("customer_create", payload);
         return null;
       }
-      return createCustomer(payload);
+      try {
+        return await createCustomer(payload);
+      } catch (e) {
+        if (isNetworkError(e)) {
+          await enqueue("customer_create", payload);
+          return null;
+        }
+        throw e;
+      }
     },
     onSuccess: (result) => {
       if (result === null) {
