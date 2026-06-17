@@ -1,5 +1,19 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { ArrowLeftRight, Building2, Database, LayoutDashboard, LogOut, Package, RefreshCw, Settings, ShoppingCart, Tags, Users } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Building2,
+  Database,
+  LayoutDashboard,
+  LogOut,
+  Package,
+  RefreshCw,
+  Settings,
+  ShoppingCart,
+  Tags,
+  Users,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -9,10 +23,13 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { usePendingOps } from "@/hooks/usePendingOps";
 
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -31,6 +48,8 @@ const ADMIN_ITEMS = [
 
 export function AppSidebar() {
   const { user } = useAuth();
+  const isOnline = useOnlineStatus();
+  const { total } = usePendingOps();
   const currentPath = useRouterState({ select: (s) => s.location.pathname });
 
   return (
@@ -53,6 +72,21 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={currentPath === "/offline"}>
+                  <Link to="/offline">
+                    {isOnline ? (
+                      <Wifi className="h-4 w-4" />
+                    ) : (
+                      <WifiOff className="h-4 w-4 text-destructive" />
+                    )}
+                    <span>Sincronización</span>
+                  </Link>
+                </SidebarMenuButton>
+                {total > 0 && (
+                  <SidebarMenuBadge>{total > 99 ? "99+" : total}</SidebarMenuBadge>
+                )}
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

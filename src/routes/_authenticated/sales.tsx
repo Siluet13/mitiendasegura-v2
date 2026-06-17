@@ -51,7 +51,7 @@ type OfflineSalePayload = {
 
 let isSyncing = false;
 
-async function syncPendingSales(qc: QueryClient): Promise<void> {
+export async function syncPendingSales(qc: QueryClient): Promise<void> {
   if (isSyncing) return;
   isSyncing = true;
 

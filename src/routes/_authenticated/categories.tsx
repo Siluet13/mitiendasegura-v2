@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2, WifiOff } from "lucide-react";
 import {
   createCategory,
   deleteCategory,
@@ -13,6 +13,9 @@ import {
   updateCategory,
   type Category,
 } from "@/lib/api/inventory";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useReconnect } from "@/hooks/useReconnect";
+import { enqueue, listPending, dequeue } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -52,8 +55,71 @@ const schema = z.object({
 });
 type FormValues = z.infer<typeof schema>;
 
+let isSyncing = false;
+
+export async function syncPendingCategories(qc: QueryClient): Promise<void> {
+  if (isSyncing) return;
+  isSyncing = true;
+
+  let toastId: string | number | undefined;
+  try {
+    const pending = await listPending();
+    const categoryPending = pending.filter((op) => op.type === "category_create");
+
+    if (categoryPending.length === 0) return;
+
+    toastId = toast.loading(
+      `Sincronizando ${categoryPending.length} categoría${categoryPending.length !== 1 ? "s" : ""} pendiente${categoryPending.length !== 1 ? "s" : ""}…`
+    );
+
+    let synced = 0;
+    let failed = 0;
+
+    for (const op of categoryPending) {
+      if (op.id == null) continue;
+      try {
+        await createCategory(op.payload as { nombre: string });
+        await dequeue(op.id);
+        synced++;
+      } catch {
+        failed++;
+      }
+    }
+
+    toast.dismiss(toastId);
+
+    if (synced > 0) {
+      qc.invalidateQueries({ queryKey: ["categories"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    }
+
+    if (synced > 0 && failed === 0) {
+      toast.success(
+        `${synced} categoría${synced !== 1 ? "s" : ""} sincronizada${synced !== 1 ? "s" : ""} correctamente`
+      );
+    } else if (synced === 0 && failed > 0) {
+      toast.error(
+        `${failed} categoría${failed !== 1 ? "s" : ""} no pudo sincronizarse. Se reintentará al reconectar.`
+      );
+    } else if (synced > 0 && failed > 0) {
+      toast.warning(
+        `${synced} sincronizada${synced !== 1 ? "s" : ""}, ${failed} pendiente${failed !== 1 ? "s" : ""} — se reintentará al reconectar`
+      );
+    }
+  } catch {
+    toast.dismiss(toastId);
+    toast.error("Error al sincronizar categorías pendientes");
+  } finally {
+    isSyncing = false;
+  }
+}
+
 function CategoriesPage() {
   const qc = useQueryClient();
+  const isOnline = useOnlineStatus();
+  const handleReconnect = useCallback(() => syncPendingCategories(qc), [qc]);
+  useReconnect(handleReconnect);
+
   const { data = [], isLoading } = useQuery({ queryKey: ["categories"], queryFn: listCategories });
 
   const [open, setOpen] = useState(false);
@@ -77,9 +143,22 @@ function CategoriesPage() {
   }
 
   const saveMut = useMutation({
-    mutationFn: async (values: FormValues) =>
-      editing ? updateCategory(editing.id, values) : createCategory(values),
-    onSuccess: () => {
+    mutationFn: async (values: FormValues) => {
+      if (editing) {
+        return updateCategory(editing.id, values);
+      }
+      if (!isOnline) {
+        await enqueue("category_create", values);
+        return null;
+      }
+      return createCategory(values);
+    },
+    onSuccess: (result) => {
+      if (result === null) {
+        toast.success("Categoría guardada localmente. Se sincronizará al reconectar.");
+        setOpen(false);
+        return;
+      }
       qc.invalidateQueries({ queryKey: ["categories"] });
       qc.invalidateQueries({ queryKey: ["products"] });
       toast.success(editing ? "Categoría actualizada" : "Categoría creada");
@@ -102,7 +181,14 @@ function CategoriesPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Categorías</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold">Categorías</h1>
+          {!isOnline && (
+            <span className="flex items-center gap-1 text-sm text-muted-foreground">
+              <WifiOff className="h-4 w-4" /> Offline
+            </span>
+          )}
+        </div>
         <Button onClick={openNew} className="gap-2">
           <Plus className="h-4 w-4" /> Nueva
         </Button>

@@ -81,7 +81,7 @@ const defaults: FormValues = {
 
 let isSyncing = false;
 
-async function syncPendingCustomers(qc: QueryClient): Promise<void> {
+export async function syncPendingCustomers(qc: QueryClient): Promise<void> {
   if (isSyncing) return;
   isSyncing = true;
 

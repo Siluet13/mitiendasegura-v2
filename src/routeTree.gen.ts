@@ -20,6 +20,7 @@ import { Route as AuthenticatedStockMovementsRouteImport } from './routes/_authe
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedSalesRouteImport } from './routes/_authenticated/sales'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
+import { Route as AuthenticatedOfflineRouteImport } from './routes/_authenticated/offline'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedCategoriesRouteImport } from './routes/_authenticated/categories'
@@ -80,6 +81,11 @@ const AuthenticatedProductsRoute = AuthenticatedProductsRouteImport.update({
   path: '/products',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedOfflineRoute = AuthenticatedOfflineRouteImport.update({
+  id: '/offline',
+  path: '/offline',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -112,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/categories': typeof AuthenticatedCategoriesRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/offline': typeof AuthenticatedOfflineRoute
   '/products': typeof AuthenticatedProductsRoute
   '/sales': typeof AuthenticatedSalesRoute
   '/settings': typeof AuthenticatedSettingsRoute
@@ -128,6 +135,7 @@ export interface FileRoutesByTo {
   '/categories': typeof AuthenticatedCategoriesRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/offline': typeof AuthenticatedOfflineRoute
   '/products': typeof AuthenticatedProductsRoute
   '/sales': typeof AuthenticatedSalesRoute
   '/settings': typeof AuthenticatedSettingsRoute
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   '/_authenticated/categories': typeof AuthenticatedCategoriesRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/offline': typeof AuthenticatedOfflineRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/sales': typeof AuthenticatedSalesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
@@ -164,6 +173,7 @@ export interface FileRouteTypes {
     | '/categories'
     | '/customers'
     | '/dashboard'
+    | '/offline'
     | '/products'
     | '/sales'
     | '/settings'
@@ -180,6 +190,7 @@ export interface FileRouteTypes {
     | '/categories'
     | '/customers'
     | '/dashboard'
+    | '/offline'
     | '/products'
     | '/sales'
     | '/settings'
@@ -197,6 +208,7 @@ export interface FileRouteTypes {
     | '/_authenticated/categories'
     | '/_authenticated/customers'
     | '/_authenticated/dashboard'
+    | '/_authenticated/offline'
     | '/_authenticated/products'
     | '/_authenticated/sales'
     | '/_authenticated/settings'
@@ -292,6 +304,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProductsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/offline': {
+      id: '/_authenticated/offline'
+      path: '/offline'
+      fullPath: '/offline'
+      preLoaderRoute: typeof AuthenticatedOfflineRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -328,6 +347,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedCategoriesRoute: typeof AuthenticatedCategoriesRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedOfflineRoute: typeof AuthenticatedOfflineRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedSalesRoute: typeof AuthenticatedSalesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
@@ -339,6 +359,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedCategoriesRoute: AuthenticatedCategoriesRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedOfflineRoute: AuthenticatedOfflineRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedSalesRoute: AuthenticatedSalesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,

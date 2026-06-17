@@ -3,8 +3,9 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { useLicense } from "@/hooks/useLicense";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { Button } from "@/components/ui/button";
-import { ShieldX } from "lucide-react";
+import { ShieldX, WifiOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated")({
   component: AuthenticatedLayout,
@@ -36,6 +37,7 @@ function LicenseBlock({ status }: { status: string }) {
 function AuthenticatedLayout() {
   const { user, loading } = useAuth();
   const { license, licenseLoading } = useLicense();
+  const isOnline = useOnlineStatus();
 
   if (loading || (user && licenseLoading)) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Cargando...</div>;
@@ -51,8 +53,14 @@ function AuthenticatedLayout() {
       <div className="flex min-h-screen w-full">
         <AppSidebar />
         <div className="flex flex-1 flex-col">
-          <header className="flex h-12 items-center border-b px-2">
+          <header className="flex h-12 items-center border-b px-2 gap-2">
             <SidebarTrigger />
+            {!isOnline && (
+              <span className="ml-auto flex items-center gap-1.5 pr-4 text-sm text-muted-foreground">
+                <WifiOff className="h-4 w-4" />
+                Sin conexión
+              </span>
+            )}
           </header>
           <main className="flex-1 p-6">
             <Outlet />
