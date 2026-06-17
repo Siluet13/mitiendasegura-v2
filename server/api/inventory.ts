@@ -264,73 +264,105 @@ export function registerInventoryRoutes(app: Express): void {
       return res.status(400).json({ message: "La venta no puede estar vacía" });
     }
 
-    if (customer_id) {
-      const [cust] = await db
-        .select()
-        .from(customers)
-        .where(and(eq(customers.id, customer_id), eq(customers.tenantId, tenantId)));
-      if (!cust) return res.status(400).json({ message: "Cliente no encontrado" });
-    }
-
-    const [newSale] = await db
-      .insert(sales)
-      .values({ ownerId: userId, tenantId, userId, total: "0", observacion: observacion ?? null, customerId: customer_id ?? null })
-      .returning();
-
-    let total = 0;
     const seen = new Set<string>();
     for (const item of items) {
       const { product_id, cantidad } = item;
-      if (!product_id || !cantidad || cantidad <= 0) {
+      if (!product_id || !cantidad || cantidad <= 0 || !Number.isInteger(Number(cantidad))) {
         return res.status(400).json({ message: "Item inválido" });
       }
       if (seen.has(product_id)) {
         return res.status(400).json({ message: "Producto duplicado en la venta" });
       }
       seen.add(product_id);
-
-      const [prod] = await db
-        .select()
-        .from(products)
-        .where(and(eq(products.id, product_id), eq(products.tenantId, tenantId)));
-      if (!prod) return res.status(400).json({ message: `Producto no encontrado: ${product_id}` });
-
-      if (prod.stock - cantidad < 0) {
-        return res.status(400).json({ message: `Stock insuficiente para ${prod.nombre} (disponible: ${prod.stock})` });
-      }
-
-      const precioUnitario = Number(prod.precio);
-      const subtotal = precioUnitario * cantidad;
-      total += subtotal;
-
-      await db.insert(saleItems).values({
-        saleId: newSale.id,
-        productId: product_id,
-        cantidad,
-        precioUnitario: String(precioUnitario),
-        subtotal: String(subtotal),
-      });
-
-      await db
-        .update(products)
-        .set({ stock: prod.stock - cantidad, updatedAt: new Date() })
-        .where(eq(products.id, product_id));
-
-      await db.insert(stockMovements).values({
-        ownerId: userId,
-        tenantId,
-        userId,
-        productId: product_id,
-        tipo: "salida",
-        cantidad,
-        observacion: "Venta",
-        referenciaTipo: "sale",
-        referenciaId: newSale.id,
-      });
     }
 
-    await db.update(sales).set({ total: String(total) }).where(eq(sales.id, newSale.id));
-    res.json({ id: newSale.id });
+    try {
+      const result = await db.transaction(async (tx) => {
+        if (customer_id) {
+          const [cust] = await tx
+            .select({ id: customers.id })
+            .from(customers)
+            .where(and(eq(customers.id, customer_id), eq(customers.tenantId, tenantId)));
+          if (!cust) throw Object.assign(new Error("Cliente no encontrado"), { status: 400 });
+        }
+
+        const [newSale] = await tx
+          .insert(sales)
+          .values({
+            ownerId: userId,
+            tenantId,
+            userId,
+            total: "0",
+            observacion: observacion ?? null,
+            customerId: customer_id ?? null,
+          })
+          .returning();
+
+        let total = 0;
+
+        for (const item of items) {
+          const { product_id, cantidad } = item;
+
+          const [prod] = await tx
+            .select()
+            .from(products)
+            .where(and(eq(products.id, product_id), eq(products.tenantId, tenantId)))
+            .for("update");
+
+          if (!prod) {
+            throw Object.assign(
+              new Error(`Producto no encontrado: ${product_id}`),
+              { status: 400 }
+            );
+          }
+
+          if (prod.stock < cantidad) {
+            throw Object.assign(
+              new Error(`Stock insuficiente para "${prod.nombre}" (disponible: ${prod.stock})`),
+              { status: 400 }
+            );
+          }
+
+          const precioUnitario = Number(prod.precio);
+          const subtotal = precioUnitario * cantidad;
+          total += subtotal;
+
+          await tx.insert(saleItems).values({
+            saleId: newSale.id,
+            productId: product_id,
+            cantidad,
+            precioUnitario: String(precioUnitario),
+            subtotal: String(subtotal),
+          });
+
+          await tx
+            .update(products)
+            .set({ stock: prod.stock - cantidad, updatedAt: new Date() })
+            .where(eq(products.id, product_id));
+
+          await tx.insert(stockMovements).values({
+            ownerId: userId,
+            tenantId,
+            userId,
+            productId: product_id,
+            tipo: "salida",
+            cantidad,
+            observacion: "Venta",
+            referenciaTipo: "sale",
+            referenciaId: newSale.id,
+          });
+        }
+
+        await tx.update(sales).set({ total: String(total) }).where(eq(sales.id, newSale.id));
+        return { id: newSale.id };
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      const status = (err as any).status === 400 ? 400 : 500;
+      const message = err?.message ?? "Error al registrar la venta";
+      res.status(status).json({ message });
+    }
   });
 
   // ── Stock Movements ───────────────────────────────────────────────────────
