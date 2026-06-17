@@ -184,6 +184,7 @@ export async function createSale(input: {
   items: SaleItemInput[];
   observacion?: string | null;
   customer_id?: string | null;
+  client_id?: string | null;
 }) {
   const data = await apiFetch<{ id: string }>("/api/sales", {
     method: "POST",
@@ -191,6 +192,7 @@ export async function createSale(input: {
       items: input.items,
       observacion: input.observacion,
       customer_id: input.customer_id,
+      client_id: input.client_id ?? null,
     }),
   });
   return data.id;

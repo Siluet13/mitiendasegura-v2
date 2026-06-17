@@ -258,7 +258,7 @@ export function registerInventoryRoutes(app: Express): void {
   app.post("/api/sales", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
-    const { items, observacion, customer_id } = req.body;
+    const { items, observacion, customer_id, client_id } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "La venta no puede estar vacía" });
@@ -274,6 +274,16 @@ export function registerInventoryRoutes(app: Express): void {
         return res.status(400).json({ message: "Producto duplicado en la venta" });
       }
       seen.add(product_id);
+    }
+
+    if (client_id && typeof client_id === "string") {
+      const [existing] = await db
+        .select({ id: sales.id })
+        .from(sales)
+        .where(and(eq(sales.tenantId, tenantId), eq(sales.clientId, client_id)));
+      if (existing) {
+        return res.json({ id: existing.id });
+      }
     }
 
     try {
@@ -292,6 +302,7 @@ export function registerInventoryRoutes(app: Express): void {
             ownerId: userId,
             tenantId,
             userId,
+            clientId: client_id && typeof client_id === "string" ? client_id : null,
             total: "0",
             observacion: observacion ?? null,
             customerId: customer_id ?? null,

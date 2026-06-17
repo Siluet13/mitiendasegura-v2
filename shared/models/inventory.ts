@@ -8,6 +8,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -65,11 +66,13 @@ export const sales = pgTable("sales", {
   tenantId: uuid("tenant_id").notNull(),
   userId: varchar("user_id").notNull(),
   customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+  clientId: text("client_id"),
   total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
   observacion: text("observacion"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("sales_tenant_id_idx").on(t.tenantId),
+  uniqueIndex("sales_tenant_client_id_idx").on(t.tenantId, t.clientId),
 ]);
 
 export const saleItems = pgTable("sale_items", {

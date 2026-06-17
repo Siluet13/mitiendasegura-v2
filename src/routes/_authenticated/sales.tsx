@@ -47,6 +47,7 @@ type OfflineSalePayload = {
   items: SaleItemInput[];
   observacion?: string | null;
   customer_id?: string | null;
+  client_id: string;
 };
 
 let isSyncing = false;
@@ -82,6 +83,7 @@ export async function syncPendingSales(qc: QueryClient): Promise<void> {
           items: payload.items,
           observacion: payload.observacion ?? null,
           customer_id: payload.customer_id ?? null,
+          client_id: payload.client_id,
         });
         await dequeue(op.id);
         synced++;
@@ -409,13 +411,18 @@ function NewSaleDialog({
   const mut = useMutation({
     mutationFn: async (values: { observacion?: string }) => {
       if (lines.length === 0) throw new Error("La venta no puede estar vacía");
+      const clientId = crypto.randomUUID();
       const saleInput = {
         items: lines,
         observacion: values.observacion?.trim() ? values.observacion : null,
         customer_id: customerId !== NO_CUSTOMER ? customerId : null,
+        client_id: clientId,
       };
-      const offlinePayload = {
-        ...saleInput,
+      const offlinePayload: OfflineSalePayload = {
+        items: saleInput.items,
+        observacion: saleInput.observacion,
+        customer_id: saleInput.customer_id,
+        client_id: clientId,
         items_snapshot: lines.map((l) => ({
           product_id: l.product_id,
           cantidad: l.cantidad,
@@ -423,7 +430,7 @@ function NewSaleDialog({
           precioUnitario: productMap.get(l.product_id)?.precio ?? null,
         })),
         total,
-      };
+      } as OfflineSalePayload & { items_snapshot: unknown[]; total: number };
       if (!isOnline) {
         await enqueue("sale", offlinePayload);
         return { offline: true as const };
