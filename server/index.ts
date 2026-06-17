@@ -6,6 +6,7 @@ import { registerSettingsRoutes } from "./api/settings";
 import { registerBackupRoutes } from "./api/backup";
 import { registerLicenseRoutes } from "./api/license";
 import { registerAdminRoutes } from "./api/admin";
+import { registerEventsRoutes } from "./api/events";
 import { checkLicense } from "./middleware/license";
 import { resolveTenant } from "./middleware/tenant";
 
@@ -16,6 +17,7 @@ app.use(express.json());
   await setupAuth(app);
   app.use(resolveTenant);
   registerAuthRoutes(app);
+  registerEventsRoutes(app);
   registerLicenseRoutes(app);
   registerAdminRoutes(app);
 

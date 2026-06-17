@@ -3,6 +3,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
+import { broadcast } from "../lib/events";
 import {
   categories,
   products,
@@ -38,6 +39,7 @@ export function registerInventoryRoutes(app: Express): void {
       .insert(categories)
       .values({ ownerId: userId, tenantId, nombre })
       .returning();
+    broadcast(tenantId, { type: "invalidate", entities: ["categories"] });
     res.json(row);
   });
 
@@ -51,6 +53,7 @@ export function registerInventoryRoutes(app: Express): void {
       .where(and(eq(categories.id, req.params.id), eq(categories.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
+    broadcast(tenantId, { type: "invalidate", entities: ["categories"] });
     res.json(row);
   });
 
@@ -113,6 +116,7 @@ export function registerInventoryRoutes(app: Express): void {
         activo: body.activo ?? true,
       })
       .returning();
+    broadcast(tenantId, { type: "invalidate", entities: ["products"] });
     res.json(toProductResponse(row));
   });
 
@@ -138,6 +142,7 @@ export function registerInventoryRoutes(app: Express): void {
       .where(and(eq(products.id, req.params.id), eq(products.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
+    broadcast(tenantId, { type: "invalidate", entities: ["products"] });
     res.json(toProductResponse(row));
   });
 
@@ -178,6 +183,7 @@ export function registerInventoryRoutes(app: Express): void {
         observaciones: body.observaciones ?? null,
       })
       .returning();
+    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
     res.json(row);
   });
 
@@ -197,6 +203,7 @@ export function registerInventoryRoutes(app: Express): void {
       .where(and(eq(customers.id, req.params.id), eq(customers.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
+    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
     res.json(row);
   });
 
@@ -368,6 +375,7 @@ export function registerInventoryRoutes(app: Express): void {
         return { id: newSale.id };
       });
 
+      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements"] });
       res.json(result);
     } catch (err: any) {
       const status = (err as any).status === 400 ? 400 : 500;

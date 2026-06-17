@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/layout/AppSidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { useLicense } from "@/hooks/useLicense";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useTenantEvents } from "@/hooks/useTenantEvents";
 import { Button } from "@/components/ui/button";
 import { ShieldX, WifiOff } from "lucide-react";
 
@@ -38,6 +39,7 @@ function AuthenticatedLayout() {
   const { user, loading } = useAuth();
   const { license, licenseLoading } = useLicense();
   const isOnline = useOnlineStatus();
+  useTenantEvents();
 
   if (loading || (user && licenseLoading)) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Cargando...</div>;
