@@ -1,12 +1,15 @@
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const SHELL_CACHE = `mi-tienda-shell-${CACHE_VERSION}`;
 const ASSETS_CACHE = `mi-tienda-assets-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
   '/',
+  '/offline.html',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/icons/icon-maskable-192.png',
+  '/icons/icon-maskable-512.png',
   '/icons/apple-touch-icon.png',
   '/icons/icon.svg',
 ];
@@ -36,26 +39,30 @@ self.addEventListener('message', (event) => {
   }
 });
 
-function isApiOrDev(url) {
+function isExcluded(url) {
   return (
     url.pathname.startsWith('/api/') ||
-    url.pathname.startsWith('/@') ||
-    url.pathname.startsWith('/__') ||
+    url.pathname.startsWith('/@vite') ||
+    url.pathname.startsWith('/@react') ||
+    url.pathname.startsWith('/node_modules') ||
     url.pathname.includes('hot-update') ||
     url.hostname !== self.location.hostname
   );
 }
 
 function isStaticAsset(pathname) {
-  return /\.(js|css|png|jpg|jpeg|svg|gif|webp|ico|woff|woff2|ttf|otf)$/.test(pathname)
-    || pathname === '/manifest.json'
-    || pathname.startsWith('/icons/');
+  return (
+    /\.(js|mjs|cjs|css|png|jpg|jpeg|svg|gif|webp|ico|woff|woff2|ttf|otf)$/.test(pathname) ||
+    pathname === '/manifest.json' ||
+    pathname.startsWith('/icons/') ||
+    pathname.startsWith('/assets/')
+  );
 }
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  if (isApiOrDev(url) || event.request.method !== 'GET') return;
+  if (isExcluded(url) || event.request.method !== 'GET') return;
 
   if (isStaticAsset(url.pathname)) {
     event.respondWith(
@@ -63,8 +70,8 @@ self.addEventListener('fetch', (event) => {
         if (cached) return cached;
         return fetch(event.request).then((response) => {
           if (response?.ok) {
-            caches.open(ASSETS_CACHE)
-              .then((cache) => cache.put(event.request, response.clone()));
+            const clone = response.clone();
+            caches.open(ASSETS_CACHE).then((cache) => cache.put(event.request, clone));
           }
           return response;
         }).catch(() => cached ?? new Response('', { status: 503 }));
@@ -78,14 +85,15 @@ self.addEventListener('fetch', (event) => {
       fetch(event.request)
         .then((response) => {
           if (response?.ok) {
-            caches.open(SHELL_CACHE)
-              .then((cache) => cache.put(event.request, response.clone()));
+            const clone = response.clone();
+            caches.open(SHELL_CACHE).then((cache) => cache.put(event.request, clone));
           }
           return response;
         })
         .catch(() =>
           caches.match(event.request)
             .then((cached) => cached || caches.match('/'))
+            .then((cached) => cached || caches.match('/offline.html'))
         )
     );
   }
