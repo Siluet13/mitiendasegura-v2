@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2, Search } from "lucide-react";
+import { Pencil, Plus, Trash2, Search, WifiOff } from "lucide-react";
 import {
   createProduct,
   deleteProduct,
@@ -15,6 +15,9 @@ import {
   type Product,
   type ProductInput,
 } from "@/lib/api/inventory";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useReconnect } from "@/hooks/useReconnect";
+import { enqueue, listPending, dequeue } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -70,8 +73,70 @@ const defaults: FormValues = {
   activo: true,
 };
 
+let isSyncing = false;
+
+async function syncPendingProducts(qc: QueryClient): Promise<void> {
+  if (isSyncing) return;
+  isSyncing = true;
+
+  let toastId: string | number | undefined;
+  try {
+    const pending = await listPending();
+    const productPending = pending.filter((op) => op.type === "product_create");
+
+    if (productPending.length === 0) return;
+
+    toastId = toast.loading(
+      `Sincronizando ${productPending.length} producto${productPending.length !== 1 ? "s" : ""} pendiente${productPending.length !== 1 ? "s" : ""}…`
+    );
+
+    let synced = 0;
+    let failed = 0;
+
+    for (const op of productPending) {
+      if (op.id == null) continue;
+      try {
+        await createProduct(op.payload as ProductInput);
+        await dequeue(op.id);
+        synced++;
+      } catch {
+        failed++;
+      }
+    }
+
+    toast.dismiss(toastId);
+
+    if (synced > 0) {
+      qc.invalidateQueries({ queryKey: ["products"] });
+    }
+
+    if (synced > 0 && failed === 0) {
+      toast.success(
+        `${synced} producto${synced !== 1 ? "s" : ""} sincronizado${synced !== 1 ? "s" : ""} correctamente`
+      );
+    } else if (synced === 0 && failed > 0) {
+      toast.error(
+        `${failed} producto${failed !== 1 ? "s" : ""} no pudo sincronizarse. Se reintentará al reconectar.`
+      );
+    } else if (synced > 0 && failed > 0) {
+      toast.warning(
+        `${synced} sincronizado${synced !== 1 ? "s" : ""}, ${failed} pendiente${failed !== 1 ? "s" : ""} — se reintentará al reconectar`
+      );
+    }
+  } catch {
+    toast.dismiss(toastId);
+    toast.error("Error al sincronizar productos pendientes");
+  } finally {
+    isSyncing = false;
+  }
+}
+
 function ProductsPage() {
   const qc = useQueryClient();
+  const isOnline = useOnlineStatus();
+  const handleReconnect = useCallback(() => syncPendingProducts(qc), [qc]);
+  useReconnect(handleReconnect);
+
   const { data: products = [], isLoading } = useQuery({ queryKey: ["products"], queryFn: listProducts });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: listCategories });
 
@@ -137,9 +202,21 @@ function ProductsPage() {
         category_id: values.category_id && values.category_id !== NO_CAT ? values.category_id : null,
         activo: values.activo,
       };
-      return editing ? updateProduct(editing.id, payload) : createProduct(payload);
+      if (editing) {
+        return updateProduct(editing.id, payload);
+      }
+      if (!isOnline) {
+        await enqueue("product_create", payload);
+        return null;
+      }
+      return createProduct(payload);
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (result === null) {
+        toast.success("Producto guardado localmente. Se sincronizará al reconectar.");
+        setOpen(false);
+        return;
+      }
       qc.invalidateQueries({ queryKey: ["products"] });
       toast.success(editing ? "Producto actualizado" : "Producto creado");
       setOpen(false);
@@ -160,7 +237,14 @@ function ProductsPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Productos</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold">Productos</h1>
+          {!isOnline && (
+            <span className="flex items-center gap-1 text-sm text-muted-foreground">
+              <WifiOff className="h-4 w-4" /> Offline
+            </span>
+          )}
+        </div>
         <Button onClick={openNew} className="gap-2">
           <Plus className="h-4 w-4" /> Nuevo
         </Button>
