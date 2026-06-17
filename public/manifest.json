@@ -1,14 +1,17 @@
 {
+  "id": "/",
   "name": "Mi Tienda Segura",
   "short_name": "Mi Tienda",
   "description": "Sistema POS para gestionar tu negocio",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "background_color": "#ffffff",
   "theme_color": "#16a34a",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "lang": "es",
+  "dir": "ltr",
   "categories": ["business", "productivity"],
   "icons": [
     {
@@ -32,6 +35,26 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nueva venta",
+      "short_name": "Venta",
+      "url": "/sales",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/dashboard",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

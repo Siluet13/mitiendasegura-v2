@@ -6,7 +6,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
@@ -133,6 +133,109 @@ function OfflineBanner() {
   );
 }
 
+function PwaUpdateBanner() {
+  const [show, setShow] = useState(false);
+  const waitingSwRef = useRef<ServiceWorker | null>(null);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+
+    function trackWaiting(reg: ServiceWorkerRegistration) {
+      if (reg.waiting) {
+        waitingSwRef.current = reg.waiting;
+        setShow(true);
+        return;
+      }
+      reg.addEventListener("updatefound", () => {
+        const installing = reg.installing;
+        if (!installing) return;
+        installing.addEventListener("statechange", () => {
+          if (installing.state === "installed" && navigator.serviceWorker.controller) {
+            waitingSwRef.current = installing;
+            setShow(true);
+          }
+        });
+      });
+    }
+
+    navigator.serviceWorker.getRegistration("/sw.js").then((reg) => {
+      if (reg) trackWaiting(reg);
+    });
+
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!reloading) {
+        reloading = true;
+        window.location.reload();
+      }
+    });
+  }, []);
+
+  function handleUpdate() {
+    const sw = waitingSwRef.current;
+    if (sw) {
+      sw.postMessage({ type: "SKIP_WAITING" });
+    }
+    setShow(false);
+  }
+
+  if (!show) return null;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        background: "#16a34a",
+        color: "#ffffff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "12px",
+        padding: "8px 16px",
+        fontSize: "13px",
+        zIndex: 10000,
+      }}
+    >
+      <span>Nueva versión disponible</span>
+      <button
+        onClick={handleUpdate}
+        style={{
+          background: "#ffffff",
+          color: "#16a34a",
+          border: "none",
+          borderRadius: "4px",
+          padding: "3px 10px",
+          fontSize: "12px",
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        Actualizar
+      </button>
+      <button
+        onClick={() => setShow(false)}
+        aria-label="Cerrar"
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "#ffffff",
+          cursor: "pointer",
+          fontSize: "16px",
+          lineHeight: 1,
+          padding: "0 4px",
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
@@ -147,6 +250,7 @@ function RootComponent() {
       <Outlet />
       <Toaster />
       <OfflineBanner />
+      <PwaUpdateBanner />
     </QueryClientProvider>
   );
 }
