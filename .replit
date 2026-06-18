@@ -80,6 +80,10 @@ externalPort = 3003
 localPort = 5003
 externalPort = 3001
 
+[[ports]]
+localPort = 5004
+externalPort = 8008
+
 [deployment]
 deploymentTarget = "autoscale"
 run = ["bun", "server/index.ts"]
