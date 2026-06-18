@@ -37,6 +37,10 @@ args = "bun server/index.ts & bunx vite dev"
 waitForPort = 5000
 
 [[ports]]
+localPort = 4444
+externalPort = 3002
+
+[[ports]]
 localPort = 5000
 externalPort = 80
 

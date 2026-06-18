@@ -1,9 +1,8 @@
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const SHELL_CACHE = `mi-tienda-shell-${CACHE_VERSION}`;
 const ASSETS_CACHE = `mi-tienda-assets-${CACHE_VERSION}`;
 
-const PRECACHE_URLS = [
-  '/',
+const STATIC_PRECACHE = [
   '/offline.html',
   '/manifest.json',
   '/icons/icon-192.png',
@@ -16,8 +15,38 @@ const PRECACHE_URLS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE)
-      .then((cache) => cache.addAll(PRECACHE_URLS).catch(() => {}))
+    fetch('/')
+      .then(async (shellResponse) => {
+        const html = await shellResponse.text();
+
+        const jsUrls  = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+\.js)"/g)].map((m) => m[1]);
+        const cssUrls = [...html.matchAll(/href="(\/assets\/[^"]+\.css)"/g)].map((m) => m[1]);
+        const discovered = [...new Set([...jsUrls, ...cssUrls])];
+
+        const cache = await caches.open(SHELL_CACHE);
+
+        await cache.put('/', new Response(html, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        }));
+
+        await Promise.all(
+          STATIC_PRECACHE.map((url) =>
+            fetch(url).then((r) => (r.ok ? cache.put(url, r) : null)).catch(() => null)
+          )
+        );
+
+        await Promise.all(
+          discovered.map((url) =>
+            fetch(url).then((r) => (r.ok ? cache.put(url, r) : null)).catch(() => null)
+          )
+        );
+
+        console.log(`[SW v4] install: shell + ${STATIC_PRECACHE.length} static + ${discovered.length} asset bundles cached`);
+      })
+      .catch(() =>
+        caches.open(SHELL_CACHE)
+          .then((cache) => cache.addAll([...STATIC_PRECACHE]).catch(() => {}))
+      )
   );
 });
 
