@@ -1,4 +1,5 @@
 import express from "express";
+import { existsSync } from "fs";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerInventoryRoutes } from "./api/inventory";
 import { registerDashboardRoutes } from "./api/dashboard";
@@ -29,6 +30,13 @@ app.use(express.json());
   registerBackupRoutes(app);
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+  if (existsSync("dist/client")) {
+    app.use(express.static("dist/client", { index: false }));
+    app.get("*splat", (_req, res) => {
+      res.sendFile("index.html", { root: "dist/client" });
+    });
+  }
 
   const port = parseInt(process.env.PORT ?? "5001");
   app.listen(port, "0.0.0.0", () => {

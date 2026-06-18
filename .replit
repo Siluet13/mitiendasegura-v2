@@ -62,5 +62,5 @@ externalPort = 3001
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["bun", "run", "preview"]
+run = ["bun", "server/index.ts"]
 build = ["bun", "run", "build"]
