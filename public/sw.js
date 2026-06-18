@@ -13,6 +13,25 @@ const STATIC_PRECACHE = [
   '/icons/icon.svg',
 ];
 
+function logAsset(status, pathname) {
+  if (!pathname.startsWith('/assets/')) return;
+  console.log(`[SW v4] ${status.padEnd(20)} ${pathname}`);
+}
+
+async function listCaches() {
+  const keys = await caches.keys();
+  const result = [];
+  for (const key of keys) {
+    const cache = await caches.open(key);
+    const requests = await cache.keys();
+    const urls = requests.map((r) => new URL(r.url).pathname).sort();
+    result.push({ cache: key, count: urls.length, urls });
+    console.log(`\n[SW DIAG] ── ${key} (${urls.length} archivos) ──`);
+    for (const u of urls) console.log(`[SW DIAG]   ${u}`);
+  }
+  return result;
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     fetch('/')
@@ -37,11 +56,20 @@ self.addEventListener('install', (event) => {
 
         await Promise.all(
           discovered.map((url) =>
-            fetch(url).then((r) => (r.ok ? cache.put(url, r) : null)).catch(() => null)
+            fetch(url)
+              .then((r) => {
+                if (r.ok) {
+                  logAsset('CACHED SUCCESSFULLY', url);
+                  return cache.put(url, r);
+                }
+                logAsset('FETCH FAILED', url);
+                return null;
+              })
+              .catch(() => { logAsset('FETCH FAILED', url); return null; })
           )
         );
 
-        console.log(`[SW v4] install: shell + ${STATIC_PRECACHE.length} static + ${discovered.length} asset bundles cached`);
+        console.log(`[SW v4] install: shell + ${STATIC_PRECACHE.length} static + ${discovered.length} asset bundles precached`);
       })
       .catch(() =>
         caches.open(SHELL_CACHE)
@@ -65,6 +93,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
+  }
+  if (event.data?.type === 'DIAG_LIST_CACHES') {
+    listCaches().then((result) => {
+      event.source?.postMessage({ type: 'DIAG_RESULT', data: result });
+    });
   }
 });
 
@@ -96,14 +129,24 @@ self.addEventListener('fetch', (event) => {
   if (isStaticAsset(url.pathname)) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
-        if (cached) return cached;
+        if (cached) {
+          logAsset('CACHE HIT', url.pathname);
+          return cached;
+        }
+        logAsset('CACHE MISS', url.pathname);
         return fetch(event.request).then((response) => {
           if (response?.ok) {
+            logAsset('CACHED SUCCESSFULLY', url.pathname);
             const clone = response.clone();
             caches.open(ASSETS_CACHE).then((cache) => cache.put(event.request, clone));
+          } else {
+            logAsset('FETCH FAILED', url.pathname);
           }
           return response;
-        }).catch(() => cached ?? new Response('', { status: 503 }));
+        }).catch(() => {
+          logAsset('FETCH FAILED', url.pathname);
+          return cached ?? new Response('', { status: 503 });
+        });
       })
     );
     return;
