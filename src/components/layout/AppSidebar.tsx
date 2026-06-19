@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   ArrowLeftRight,
+  Bug,
   Building2,
   Database,
   LayoutDashboard,
@@ -44,6 +45,7 @@ const items = [
 
 const ADMIN_ITEMS = [
   { title: "Panel Maestro", url: "/admin", icon: Building2 },
+  { title: "Diagnóstico Offline", url: "/admin/offline-debug", icon: Bug },
 ] as const;
 
 export function AppSidebar() {

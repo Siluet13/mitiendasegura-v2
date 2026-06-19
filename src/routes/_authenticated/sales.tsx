@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { enqueue, isNetworkError } from "@/lib/offline/queue";
+import { log } from "@/lib/offline/logger";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -350,8 +351,10 @@ function NewSaleDialog({
         })),
         total,
       } as OfflineSalePayload & { items_snapshot: unknown[]; total: number };
+      log("SALE_CREATE_START", { itemCount: lines.length, total });
       if (!isOnline || !navigator.onLine) {
         await enqueue("sale", offlinePayload);
+        log("SALE_CREATE_ENQUEUED", { itemCount: lines.length, trigger: "offline" });
         return { offline: true as const };
       }
       try {
@@ -360,6 +363,7 @@ function NewSaleDialog({
       } catch (e) {
         if (isNetworkError(e)) {
           await enqueue("sale", offlinePayload);
+          log("SALE_CREATE_ENQUEUED", { itemCount: lines.length, trigger: "network_error" });
           return { offline: true as const };
         }
         throw e;

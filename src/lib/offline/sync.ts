@@ -10,6 +10,7 @@ import {
   type SaleItemInput,
 } from "@/lib/api/inventory";
 import { dequeue, listPending, requeueProcessingOlderThan, updateStatus } from "./queue";
+import { log } from "./logger";
 
 type OfflineSalePayload = {
   items: SaleItemInput[];
@@ -39,6 +40,7 @@ async function syncProducts(qc: QueryClient): Promise<{ synced: number; failed: 
     try {
       await createProduct(op.payload as ProductInput);
       await dequeue(op.id);
+      log("PRODUCT_CREATE_SYNCED", { id: op.id, nombre: (op.payload as ProductInput)?.nombre });
       synced++;
     } catch {
       await safeUpdateStatus(op.id, "pending");
@@ -59,6 +61,7 @@ async function syncCategories(qc: QueryClient): Promise<{ synced: number; failed
     try {
       await createCategory(op.payload as { nombre: string });
       await dequeue(op.id);
+      log("CATEGORY_CREATE_SYNCED", { id: op.id, nombre: (op.payload as { nombre: string })?.nombre });
       synced++;
     } catch {
       await safeUpdateStatus(op.id, "pending");
@@ -82,6 +85,7 @@ async function syncCustomers(qc: QueryClient): Promise<{ synced: number; failed:
     try {
       await createCustomer(op.payload as CustomerInput);
       await dequeue(op.id);
+      log("CUSTOMER_CREATE_SYNCED", { id: op.id, nombre: (op.payload as CustomerInput)?.nombre });
       synced++;
     } catch {
       await safeUpdateStatus(op.id, "pending");
@@ -108,6 +112,7 @@ async function syncSales(qc: QueryClient): Promise<{ synced: number; failed: num
         client_id: p.client_id,
       });
       await dequeue(op.id);
+      log("SALE_CREATE_SYNCED", { id: op.id, itemCount: p.items?.length });
       synced++;
     } catch {
       await safeUpdateStatus(op.id, "pending");
@@ -133,6 +138,7 @@ export async function syncAllPending(qc: QueryClient): Promise<void> {
     const all = await listPending();
     if (all.length === 0) return;
 
+    log("SYNC_START", { count: all.length });
     toastId = toast.loading(
       `Sincronizando ${all.length} operación${all.length !== 1 ? "es" : ""} pendiente${all.length !== 1 ? "s" : ""}…`,
     );
@@ -153,6 +159,13 @@ export async function syncAllPending(qc: QueryClient): Promise<void> {
 
     toast.dismiss(toastId);
 
+    if (totalSynced > 0 || totalFailed === 0) {
+      log("SYNC_SUCCESS", { synced: totalSynced, failed: totalFailed });
+    }
+    if (totalFailed > 0) {
+      log("SYNC_ERROR", { synced: totalSynced, failed: totalFailed }, "warn");
+    }
+
     if (totalSynced > 0 && totalFailed === 0) {
       toast.success(
         `${totalSynced} operación${totalSynced !== 1 ? "es" : ""} sincronizada${totalSynced !== 1 ? "s" : ""} correctamente`,
@@ -169,6 +182,7 @@ export async function syncAllPending(qc: QueryClient): Promise<void> {
   } catch {
     toast.dismiss(toastId);
     toast.error("Error al sincronizar operaciones pendientes");
+    log("SYNC_ERROR", { message: "uncaught exception in syncAllPending" }, "error");
   } finally {
     isSyncing = false;
   }

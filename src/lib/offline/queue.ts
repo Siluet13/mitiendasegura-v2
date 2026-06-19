@@ -1,5 +1,6 @@
 import { openOfflineDB, PENDING_OPS_STORE } from "./db";
 import type { PendingOp } from "./db";
+import { log } from "./logger";
 
 export type { PendingOp };
 
@@ -20,15 +21,22 @@ function store(db: IDBDatabase, mode: IDBTransactionMode): IDBObjectStore {
 }
 
 export async function enqueue(type: string, payload: unknown): Promise<number> {
-  const db = await openOfflineDB();
-  const op: Omit<PendingOp, "id"> = {
-    type,
-    payload,
-    timestamp: Date.now(),
-    status: "pending",
-  };
-  const id = await idbRequest<IDBValidKey>(store(db, "readwrite").add(op));
-  return id as number;
+  log("ENQUEUE_START", { type });
+  try {
+    const db = await openOfflineDB();
+    const op: Omit<PendingOp, "id"> = {
+      type,
+      payload,
+      timestamp: Date.now(),
+      status: "pending",
+    };
+    const id = await idbRequest<IDBValidKey>(store(db, "readwrite").add(op));
+    log("ENQUEUE_SUCCESS", { type, id });
+    return id as number;
+  } catch (e) {
+    log("IDB_ERROR", { type, error: String(e) }, "error");
+    throw e;
+  }
 }
 
 export async function dequeue(id: number): Promise<void> {
@@ -41,6 +49,17 @@ export async function listPending(): Promise<PendingOp[]> {
   return idbRequest<PendingOp[]>(
     store(db, "readonly").index("status").getAll("pending") as IDBRequest<PendingOp[]>,
   );
+}
+
+export async function listAllOps(): Promise<PendingOp[]> {
+  try {
+    const db = await openOfflineDB();
+    return idbRequest<PendingOp[]>(
+      store(db, "readonly").getAll() as IDBRequest<PendingOp[]>,
+    );
+  } catch {
+    return [];
+  }
 }
 
 export async function updateStatus(

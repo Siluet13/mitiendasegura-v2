@@ -4,3 +4,4 @@
 - [Panel Maestro & Healthcheck](admin-healthcheck.md) — /admin route exists but had no sidebar link (added); /health endpoint added to server/index.ts for Replit Deploy healthcheck.
 - [SaaS Foundation](saas-foundation.md) — tenants+profiles tables added; tenant_id NOT NULL + indexed on 5 inventory tables; migrations/ baseline created; server/lib/context.ts centralizes user/tenant helpers.
 - [Offline System Audit](offline-audit.md) — 6 bugs found and fixed: RQ cache persistence (localStorage mts_rq_cache_v1), SW skipWaiting on install, sync loop resilience (safeUpdateStatus), idbRequest abort handler, write timeouts 3000ms, gcTime 24h.
+- [Offline Debug Tool](offline-debug-tool.md) — /admin/offline-debug page (admin-only); logger.ts → localStorage mts_offline_logs (500 max); admin.tsx became layout + admin/index.tsx + admin/offline-debug.tsx child routes.

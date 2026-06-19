@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { enqueue, isNetworkError } from "@/lib/offline/queue";
+import { log } from "@/lib/offline/logger";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -144,8 +145,10 @@ function ProductsPage() {
       if (editing) {
         return updateProduct(editing.id, payload);
       }
+      log("PRODUCT_CREATE_START", { nombre: payload.nombre });
       if (!isOnline || !navigator.onLine) {
         await enqueue("product_create", payload);
+        log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, trigger: "offline" });
         return null;
       }
       try {
@@ -153,6 +156,7 @@ function ProductsPage() {
       } catch (e) {
         if (isNetworkError(e)) {
           await enqueue("product_create", payload);
+          log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, trigger: "network_error" });
           return null;
         }
         throw e;
