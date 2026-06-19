@@ -161,11 +161,13 @@ function ProductsPage() {
     onSuccess: (result) => {
       if (result === null) {
         toast.success("Producto guardado localmente. Se sincronizará al reconectar.");
+        form.reset(defaults);
         setOpen(false);
         return;
       }
       qc.invalidateQueries({ queryKey: ["products"] });
       toast.success(editing ? "Producto actualizado" : "Producto creado");
+      form.reset(defaults);
       setOpen(false);
     },
     onError: (e: Error) => toast.error(e.message),

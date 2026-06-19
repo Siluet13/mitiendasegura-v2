@@ -99,11 +99,12 @@ export type StockMovementInput = {
   observacion?: string | null;
 };
 
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const controller = new AbortController();
+  const timeoutMs = options?.timeoutMs ?? 5000;
   const timerId = setTimeout(
     () => controller.abort(new DOMException("Timeout", "TimeoutError")),
-    8000,
+    timeoutMs,
   );
   const signal = options?.signal ?? controller.signal;
   try {

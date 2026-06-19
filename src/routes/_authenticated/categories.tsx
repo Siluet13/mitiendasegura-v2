@@ -102,12 +102,14 @@ function CategoriesPage() {
     onSuccess: (result) => {
       if (result === null) {
         toast.success("Categoría guardada localmente. Se sincronizará al reconectar.");
+        form.reset({ nombre: "" });
         setOpen(false);
         return;
       }
       qc.invalidateQueries({ queryKey: ["categories"] });
       qc.invalidateQueries({ queryKey: ["products"] });
       toast.success(editing ? "Categoría actualizada" : "Categoría creada");
+      form.reset({ nombre: "" });
       setOpen(false);
     },
     onError: (e: Error) => toast.error(e.message),
