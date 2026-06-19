@@ -13,11 +13,17 @@ export interface PendingOp {
 
 export const PENDING_OPS_STORE = STORE;
 
+let _db: IDBDatabase | null = null;
+let _opening: Promise<IDBDatabase> | null = null;
+
 export function openOfflineDB(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") {
     return Promise.reject(new Error("IndexedDB not available"));
   }
-  return new Promise((resolve, reject) => {
+  if (_db) return Promise.resolve(_db);
+  if (_opening) return _opening;
+
+  _opening = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
 
     req.onupgradeneeded = (event) => {
@@ -31,7 +37,31 @@ export function openOfflineDB(): Promise<IDBDatabase> {
       }
     };
 
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      _db = req.result;
+      _db.onclose = () => {
+        _db = null;
+        _opening = null;
+      };
+      _db.onversionchange = () => {
+        _db?.close();
+        _db = null;
+        _opening = null;
+      };
+      _opening = null;
+      resolve(_db);
+    };
+
+    req.onerror = () => {
+      _opening = null;
+      reject(req.error);
+    };
+
+    req.onblocked = () => {
+      _opening = null;
+      reject(new Error("IndexedDB bloqueada por otra conexión"));
+    };
   });
+
+  return _opening;
 }

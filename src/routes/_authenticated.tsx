@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate, Outlet } from "@tanstack/react-router";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
@@ -9,6 +9,7 @@ import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useTenantEvents } from "@/hooks/useTenantEvents";
 import { useReconnect } from "@/hooks/useReconnect";
 import { syncAllPending } from "@/lib/offline/sync";
+import { listPending } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { ShieldX, WifiOff } from "lucide-react";
 
@@ -45,7 +46,32 @@ function AuthenticatedLayout() {
   const isOnline = useOnlineStatus();
   const qc = useQueryClient();
   useTenantEvents();
-  useReconnect(useCallback(() => syncAllPending(qc), [qc]));
+
+  const doSync = useCallback(() => syncAllPending(qc), [qc]);
+
+  // Cubre modo avión: dispara cuando navigator.onLine pasa de false → true
+  useReconnect(doSync);
+
+  // Cubre WiFi-sin-internet: el evento "online" dispara cuando el browser
+  // detecta internet real, aunque navigator.onLine ya era true
+  useEffect(() => {
+    window.addEventListener("online", doSync);
+    return () => window.removeEventListener("online", doSync);
+  }, [doSync]);
+
+  // Polling de respaldo: cada 20 s intenta sincronizar si hay ops pendientes
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (!navigator.onLine) return;
+      try {
+        const pending = await listPending();
+        if (pending.length > 0) syncAllPending(qc);
+      } catch {
+        // ignorar errores de IDB en el polling
+      }
+    }, 20_000);
+    return () => clearInterval(id);
+  }, [qc]);
 
   if (loading || (user && licenseLoading)) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Cargando...</div>;

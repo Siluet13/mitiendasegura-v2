@@ -3,15 +3,15 @@ import type { PendingOp } from "./db";
 
 export type { PendingOp };
 
-function tx(db: IDBDatabase, mode: IDBTransactionMode): IDBObjectStore {
-  return db.transaction(PENDING_OPS_STORE, mode).objectStore(PENDING_OPS_STORE);
-}
-
-function request<T>(req: IDBRequest<T>): Promise<T> {
+function idbRequest<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+function store(db: IDBDatabase, mode: IDBTransactionMode): IDBObjectStore {
+  return db.transaction(PENDING_OPS_STORE, mode).objectStore(PENDING_OPS_STORE);
 }
 
 export async function enqueue(type: string, payload: unknown): Promise<number> {
@@ -22,25 +22,20 @@ export async function enqueue(type: string, payload: unknown): Promise<number> {
     timestamp: Date.now(),
     status: "pending",
   };
-  const id = await request<IDBValidKey>(tx(db, "readwrite").add(op));
-  db.close();
+  const id = await idbRequest<IDBValidKey>(store(db, "readwrite").add(op));
   return id as number;
 }
 
 export async function dequeue(id: number): Promise<void> {
   const db = await openOfflineDB();
-  await request(tx(db, "readwrite").delete(id));
-  db.close();
+  await idbRequest(store(db, "readwrite").delete(id));
 }
 
 export async function listPending(): Promise<PendingOp[]> {
   const db = await openOfflineDB();
-  const index = tx(db, "readonly").index("status");
-  const result = await request<PendingOp[]>(
-    index.getAll("pending") as IDBRequest<PendingOp[]>
+  return idbRequest<PendingOp[]>(
+    store(db, "readonly").index("status").getAll("pending") as IDBRequest<PendingOp[]>,
   );
-  db.close();
-  return result;
 }
 
 export async function updateStatus(
@@ -48,33 +43,37 @@ export async function updateStatus(
   status: "pending" | "processing",
 ): Promise<void> {
   const db = await openOfflineDB();
-  const transaction = db.transaction(PENDING_OPS_STORE, "readwrite");
-  const store = transaction.objectStore(PENDING_OPS_STORE);
-  const existing = await request<PendingOp | undefined>(
-    store.get(id) as IDBRequest<PendingOp | undefined>
-  );
-  if (!existing) {
-    db.close();
-    return;
-  }
-  const updated: PendingOp = { ...existing, status };
-  if (status === "processing") {
-    updated.processingAt = Date.now();
-  } else {
-    delete updated.processingAt;
-  }
-  await request(store.put(updated));
-  db.close();
+
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(PENDING_OPS_STORE, "readwrite");
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("Transaction aborted"));
+
+    const st = tx.objectStore(PENDING_OPS_STORE);
+    const getReq = st.get(id);
+
+    getReq.onsuccess = () => {
+      const existing = getReq.result as PendingOp | undefined;
+      if (!existing) return;
+      const updated: PendingOp = { ...existing, status };
+      if (status === "processing") {
+        updated.processingAt = Date.now();
+      } else {
+        delete updated.processingAt;
+      }
+      st.put(updated);
+    };
+
+    getReq.onerror = () => reject(getReq.error);
+  });
 }
 
-export async function getProcessing(): Promise<PendingOp[]> {
+async function getProcessing(): Promise<PendingOp[]> {
   const db = await openOfflineDB();
-  const index = tx(db, "readonly").index("status");
-  const result = await request<PendingOp[]>(
-    index.getAll("processing") as IDBRequest<PendingOp[]>
+  return idbRequest<PendingOp[]>(
+    store(db, "readonly").index("status").getAll("processing") as IDBRequest<PendingOp[]>,
   );
-  db.close();
-  return result;
 }
 
 export async function requeueProcessingOlderThan(minutes: number): Promise<void> {
@@ -91,8 +90,8 @@ export async function requeueProcessingOlderThan(minutes: number): Promise<void>
 }
 
 export function isNetworkError(e: unknown): boolean {
-  if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
-    return true;
+  if (e instanceof DOMException) {
+    if (e.name === "TimeoutError" || e.name === "AbortError") return true;
   }
   if (!(e instanceof TypeError)) return false;
   const msg = e.message.toLowerCase();
@@ -106,6 +105,5 @@ export function isNetworkError(e: unknown): boolean {
 
 export async function clear(): Promise<void> {
   const db = await openOfflineDB();
-  await request(tx(db, "readwrite").clear());
-  db.close();
+  await idbRequest(store(db, "readwrite").clear());
 }

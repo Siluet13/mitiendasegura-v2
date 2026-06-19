@@ -100,18 +100,29 @@ export type StockMovementInput = {
 };
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const signal = options?.signal ?? AbortSignal?.timeout?.(8000);
-  const res = await fetch(`${API}${path}`, {
-    ...options,
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
-    signal,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.message ?? res.statusText);
+  const controller = new AbortController();
+  const timerId = setTimeout(
+    () => controller.abort(new DOMException("Timeout", "TimeoutError")),
+    8000,
+  );
+  const signal = options?.signal ?? controller.signal;
+  try {
+    const res = await fetch(`${API}${path}`, {
+      ...options,
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+      signal,
+    });
+    clearTimeout(timerId);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message ?? res.statusText);
+    }
+    return res.json();
+  } catch (e) {
+    clearTimeout(timerId);
+    throw e;
   }
-  return res.json();
 }
 
 // ── Categories ────────────────────────────────────────────────────────────────
