@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -14,8 +14,7 @@ import {
   type Category,
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { useReconnect } from "@/hooks/useReconnect";
-import { enqueue, listPending, dequeue, updateStatus, requeueProcessingOlderThan, isNetworkError } from "@/lib/offline/queue";
+import { enqueue, isNetworkError } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,74 +54,9 @@ const schema = z.object({
 });
 type FormValues = z.infer<typeof schema>;
 
-let isSyncing = false;
-
-export async function syncPendingCategories(qc: QueryClient): Promise<void> {
-  if (isSyncing) return;
-  isSyncing = true;
-
-  let toastId: string | number | undefined;
-  try {
-    await requeueProcessingOlderThan(10);
-
-    const pending = await listPending();
-    const categoryPending = pending.filter((op) => op.type === "category_create");
-
-    if (categoryPending.length === 0) return;
-
-    toastId = toast.loading(
-      `Sincronizando ${categoryPending.length} categoría${categoryPending.length !== 1 ? "s" : ""} pendiente${categoryPending.length !== 1 ? "s" : ""}…`
-    );
-
-    let synced = 0;
-    let failed = 0;
-
-    for (const op of categoryPending) {
-      if (op.id == null) continue;
-      await updateStatus(op.id, "processing");
-      try {
-        await createCategory(op.payload as { nombre: string });
-        await dequeue(op.id);
-        synced++;
-      } catch {
-        await updateStatus(op.id, "pending");
-        failed++;
-      }
-    }
-
-    toast.dismiss(toastId);
-
-    if (synced > 0) {
-      qc.invalidateQueries({ queryKey: ["categories"] });
-      qc.invalidateQueries({ queryKey: ["products"] });
-    }
-
-    if (synced > 0 && failed === 0) {
-      toast.success(
-        `${synced} categoría${synced !== 1 ? "s" : ""} sincronizada${synced !== 1 ? "s" : ""} correctamente`
-      );
-    } else if (synced === 0 && failed > 0) {
-      toast.error(
-        `${failed} categoría${failed !== 1 ? "s" : ""} no pudo sincronizarse. Se reintentará al reconectar.`
-      );
-    } else if (synced > 0 && failed > 0) {
-      toast.warning(
-        `${synced} sincronizada${synced !== 1 ? "s" : ""}, ${failed} pendiente${failed !== 1 ? "s" : ""} — se reintentará al reconectar`
-      );
-    }
-  } catch {
-    toast.dismiss(toastId);
-    toast.error("Error al sincronizar categorías pendientes");
-  } finally {
-    isSyncing = false;
-  }
-}
-
 function CategoriesPage() {
   const qc = useQueryClient();
   const isOnline = useOnlineStatus();
-  const handleReconnect = useCallback(() => syncPendingCategories(qc), [qc]);
-  useReconnect(handleReconnect);
 
   const { data = [], isLoading } = useQuery({ queryKey: ["categories"], queryFn: listCategories });
 
@@ -151,7 +85,7 @@ function CategoriesPage() {
       if (editing) {
         return updateCategory(editing.id, values);
       }
-      if (!isOnline) {
+      if (!isOnline || !navigator.onLine) {
         await enqueue("category_create", values);
         return null;
       }

@@ -1,10 +1,14 @@
 import { createFileRoute, Navigate, Outlet } from "@tanstack/react-router";
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { useLicense } from "@/hooks/useLicense";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useTenantEvents } from "@/hooks/useTenantEvents";
+import { useReconnect } from "@/hooks/useReconnect";
+import { syncAllPending } from "@/lib/offline/sync";
 import { Button } from "@/components/ui/button";
 import { ShieldX, WifiOff } from "lucide-react";
 
@@ -39,7 +43,9 @@ function AuthenticatedLayout() {
   const { user, loading } = useAuth();
   const { license, licenseLoading } = useLicense();
   const isOnline = useOnlineStatus();
+  const qc = useQueryClient();
   useTenantEvents();
+  useReconnect(useCallback(() => syncAllPending(qc), [qc]));
 
   if (loading || (user && licenseLoading)) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Cargando...</div>;

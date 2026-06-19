@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,8 +17,7 @@ import {
   type SaleItemInput,
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { useReconnect } from "@/hooks/useReconnect";
-import { enqueue, listPending, dequeue, updateStatus, requeueProcessingOlderThan, isNetworkError } from "@/lib/offline/queue";
+import { enqueue, isNetworkError } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,84 +42,6 @@ export const Route = createFileRoute("/_authenticated/sales")({
   component: SalesPage,
 });
 
-type OfflineSalePayload = {
-  items: SaleItemInput[];
-  observacion?: string | null;
-  customer_id?: string | null;
-  client_id: string;
-};
-
-let isSyncing = false;
-
-export async function syncPendingSales(qc: QueryClient): Promise<void> {
-  if (isSyncing) return;
-  isSyncing = true;
-
-  let toastId: string | number | undefined;
-  try {
-    await requeueProcessingOlderThan(10);
-
-    const pending = await listPending();
-    const salePending = pending.filter((op) => op.type === "sale");
-
-    if (salePending.length === 0) {
-      return;
-    }
-
-    toastId = toast.loading(
-      `Sincronizando ${salePending.length} venta${salePending.length !== 1 ? "s" : ""} pendiente${salePending.length !== 1 ? "s" : ""}…`
-    );
-
-    let synced = 0;
-    let failed = 0;
-
-    for (const op of salePending) {
-      if (op.id == null) continue;
-      await updateStatus(op.id, "processing");
-      const payload = op.payload as OfflineSalePayload;
-      try {
-        await createSale({
-          items: payload.items,
-          observacion: payload.observacion ?? null,
-          customer_id: payload.customer_id ?? null,
-          client_id: payload.client_id,
-        });
-        await dequeue(op.id);
-        synced++;
-      } catch {
-        await updateStatus(op.id, "pending");
-        failed++;
-      }
-    }
-
-    toast.dismiss(toastId);
-
-    if (synced > 0) {
-      qc.invalidateQueries({ queryKey: ["sales"] });
-      qc.invalidateQueries({ queryKey: ["products"] });
-      qc.invalidateQueries({ queryKey: ["stock_movements"] });
-    }
-
-    if (synced > 0 && failed === 0) {
-      toast.success(
-        `${synced} venta${synced !== 1 ? "s" : ""} sincronizada${synced !== 1 ? "s" : ""} correctamente`
-      );
-    } else if (synced === 0 && failed > 0) {
-      toast.error(
-        `${failed} venta${failed !== 1 ? "s" : ""} no pudieron sincronizarse. Se reintentarán al reconectar.`
-      );
-    } else if (synced > 0 && failed > 0) {
-      toast.warning(
-        `${synced} sincronizada${synced !== 1 ? "s" : ""}, ${failed} pendiente${failed !== 1 ? "s" : ""} — se reintentarán al reconectar`
-      );
-    }
-  } catch {
-    toast.dismiss(toastId);
-    toast.error("Error al sincronizar ventas pendientes");
-  } finally {
-    isSyncing = false;
-  }
-}
 
 const obsSchema = z.string().trim().max(500).optional().or(z.literal(""));
 const NO_CUSTOMER = "__none__";
@@ -142,8 +63,6 @@ function Kbd({ children }: { children: React.ReactNode }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 function SalesPage() {
   const qc = useQueryClient();
-  const handleReconnect = useCallback(() => syncPendingSales(qc), [qc]);
-  useReconnect(handleReconnect);
   const [open, setOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
 
@@ -431,7 +350,7 @@ function NewSaleDialog({
         })),
         total,
       } as OfflineSalePayload & { items_snapshot: unknown[]; total: number };
-      if (!isOnline) {
+      if (!isOnline || !navigator.onLine) {
         await enqueue("sale", offlinePayload);
         return { offline: true as const };
       }

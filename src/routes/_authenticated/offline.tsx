@@ -14,10 +14,7 @@ import {
 } from "@/components/ui/card";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { usePendingOps } from "@/hooks/usePendingOps";
-import { syncPendingSales } from "@/routes/_authenticated/sales";
-import { syncPendingProducts } from "@/routes/_authenticated/products";
-import { syncPendingCustomers } from "@/routes/_authenticated/customers";
-import { syncPendingCategories } from "@/routes/_authenticated/categories";
+import { syncAllPending } from "@/lib/offline/sync";
 
 export const Route = createFileRoute("/_authenticated/offline")({
   head: () => ({ meta: [{ title: "Sincronización" }] }),
@@ -43,16 +40,13 @@ function OfflinePage() {
   }, {});
 
   const handleSyncAll = useCallback(async () => {
-    if (!isOnline) {
+    if (!isOnline && !navigator.onLine) {
       toast.error("Sin conexión. Conectate a internet para sincronizar.");
       return;
     }
     setSyncing(true);
     try {
-      await syncPendingSales(qc);
-      await syncPendingProducts(qc);
-      await syncPendingCustomers(qc);
-      await syncPendingCategories(qc);
+      await syncAllPending(qc);
       await refresh();
     } finally {
       setSyncing(false);

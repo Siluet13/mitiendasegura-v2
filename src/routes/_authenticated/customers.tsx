@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -15,8 +15,7 @@ import {
   type CustomerInput,
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { useReconnect } from "@/hooks/useReconnect";
-import { enqueue, listPending, dequeue, updateStatus, requeueProcessingOlderThan, isNetworkError } from "@/lib/offline/queue";
+import { enqueue, isNetworkError } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,73 +78,9 @@ const defaults: FormValues = {
   observaciones: "",
 };
 
-let isSyncing = false;
-
-export async function syncPendingCustomers(qc: QueryClient): Promise<void> {
-  if (isSyncing) return;
-  isSyncing = true;
-
-  let toastId: string | number | undefined;
-  try {
-    await requeueProcessingOlderThan(10);
-
-    const pending = await listPending();
-    const customerPending = pending.filter((op) => op.type === "customer_create");
-
-    if (customerPending.length === 0) return;
-
-    toastId = toast.loading(
-      `Sincronizando ${customerPending.length} cliente${customerPending.length !== 1 ? "s" : ""} pendiente${customerPending.length !== 1 ? "s" : ""}…`
-    );
-
-    let synced = 0;
-    let failed = 0;
-
-    for (const op of customerPending) {
-      if (op.id == null) continue;
-      await updateStatus(op.id, "processing");
-      try {
-        await createCustomer(op.payload as CustomerInput);
-        await dequeue(op.id);
-        synced++;
-      } catch {
-        await updateStatus(op.id, "pending");
-        failed++;
-      }
-    }
-
-    toast.dismiss(toastId);
-
-    if (synced > 0) {
-      qc.invalidateQueries({ queryKey: ["customers"] });
-    }
-
-    if (synced > 0 && failed === 0) {
-      toast.success(
-        `${synced} cliente${synced !== 1 ? "s" : ""} sincronizado${synced !== 1 ? "s" : ""} correctamente`
-      );
-    } else if (synced === 0 && failed > 0) {
-      toast.error(
-        `${failed} cliente${failed !== 1 ? "s" : ""} no pudo sincronizarse. Se reintentará al reconectar.`
-      );
-    } else if (synced > 0 && failed > 0) {
-      toast.warning(
-        `${synced} sincronizado${synced !== 1 ? "s" : ""}, ${failed} pendiente${failed !== 1 ? "s" : ""} — se reintentará al reconectar`
-      );
-    }
-  } catch {
-    toast.dismiss(toastId);
-    toast.error("Error al sincronizar clientes pendientes");
-  } finally {
-    isSyncing = false;
-  }
-}
-
 function CustomersPage() {
   const qc = useQueryClient();
   const isOnline = useOnlineStatus();
-  const handleReconnect = useCallback(() => syncPendingCustomers(qc), [qc]);
-  useReconnect(handleReconnect);
 
   const { data: customers = [], isLoading } = useQuery({
     queryKey: ["customers"],
@@ -200,7 +135,7 @@ function CustomersPage() {
       if (editing) {
         return updateCustomer(editing.id, payload);
       }
-      if (!isOnline) {
+      if (!isOnline || !navigator.onLine) {
         await enqueue("customer_create", payload);
         return null;
       }

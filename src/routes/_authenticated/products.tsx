@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -16,8 +16,7 @@ import {
   type ProductInput,
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { useReconnect } from "@/hooks/useReconnect";
-import { enqueue, listPending, dequeue, updateStatus, requeueProcessingOlderThan, isNetworkError } from "@/lib/offline/queue";
+import { enqueue, isNetworkError } from "@/lib/offline/queue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -73,73 +72,9 @@ const defaults: FormValues = {
   activo: true,
 };
 
-let isSyncing = false;
-
-export async function syncPendingProducts(qc: QueryClient): Promise<void> {
-  if (isSyncing) return;
-  isSyncing = true;
-
-  let toastId: string | number | undefined;
-  try {
-    await requeueProcessingOlderThan(10);
-
-    const pending = await listPending();
-    const productPending = pending.filter((op) => op.type === "product_create");
-
-    if (productPending.length === 0) return;
-
-    toastId = toast.loading(
-      `Sincronizando ${productPending.length} producto${productPending.length !== 1 ? "s" : ""} pendiente${productPending.length !== 1 ? "s" : ""}…`
-    );
-
-    let synced = 0;
-    let failed = 0;
-
-    for (const op of productPending) {
-      if (op.id == null) continue;
-      await updateStatus(op.id, "processing");
-      try {
-        await createProduct(op.payload as ProductInput);
-        await dequeue(op.id);
-        synced++;
-      } catch {
-        await updateStatus(op.id, "pending");
-        failed++;
-      }
-    }
-
-    toast.dismiss(toastId);
-
-    if (synced > 0) {
-      qc.invalidateQueries({ queryKey: ["products"] });
-    }
-
-    if (synced > 0 && failed === 0) {
-      toast.success(
-        `${synced} producto${synced !== 1 ? "s" : ""} sincronizado${synced !== 1 ? "s" : ""} correctamente`
-      );
-    } else if (synced === 0 && failed > 0) {
-      toast.error(
-        `${failed} producto${failed !== 1 ? "s" : ""} no pudo sincronizarse. Se reintentará al reconectar.`
-      );
-    } else if (synced > 0 && failed > 0) {
-      toast.warning(
-        `${synced} sincronizado${synced !== 1 ? "s" : ""}, ${failed} pendiente${failed !== 1 ? "s" : ""} — se reintentará al reconectar`
-      );
-    }
-  } catch {
-    toast.dismiss(toastId);
-    toast.error("Error al sincronizar productos pendientes");
-  } finally {
-    isSyncing = false;
-  }
-}
-
 function ProductsPage() {
   const qc = useQueryClient();
   const isOnline = useOnlineStatus();
-  const handleReconnect = useCallback(() => syncPendingProducts(qc), [qc]);
-  useReconnect(handleReconnect);
 
   const { data: products = [], isLoading } = useQuery({ queryKey: ["products"], queryFn: listProducts });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: listCategories });
@@ -209,7 +144,7 @@ function ProductsPage() {
       if (editing) {
         return updateProduct(editing.id, payload);
       }
-      if (!isOnline) {
+      if (!isOnline || !navigator.onLine) {
         await enqueue("product_create", payload);
         return null;
       }
