@@ -91,6 +91,9 @@ export async function requeueProcessingOlderThan(minutes: number): Promise<void>
 }
 
 export function isNetworkError(e: unknown): boolean {
+  if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
+    return true;
+  }
   if (!(e instanceof TypeError)) return false;
   const msg = e.message.toLowerCase();
   return (

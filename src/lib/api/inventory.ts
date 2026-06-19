@@ -100,10 +100,12 @@ export type StockMovementInput = {
 };
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const signal = options?.signal ?? AbortSignal?.timeout?.(8000);
   const res = await fetch(`${API}${path}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
