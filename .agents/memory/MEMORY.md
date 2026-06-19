@@ -3,3 +3,4 @@
 - [PWA Removed](pwa-removed.md) — vite-plugin-pwa was fully removed (caused stale SW serving offline.html); icons remain in public/icons/ but no SW, no manifest, no offline.html.
 - [Panel Maestro & Healthcheck](admin-healthcheck.md) — /admin route exists but had no sidebar link (added); /health endpoint added to server/index.ts for Replit Deploy healthcheck.
 - [SaaS Foundation](saas-foundation.md) — tenants+profiles tables added; tenant_id NOT NULL + indexed on 5 inventory tables; migrations/ baseline created; server/lib/context.ts centralizes user/tenant helpers.
+- [Offline System Audit](offline-audit.md) — 6 bugs found and fixed: RQ cache persistence (localStorage mts_rq_cache_v1), SW skipWaiting on install, sync loop resilience (safeUpdateStatus), idbRequest abort handler, write timeouts 3000ms, gcTime 24h.

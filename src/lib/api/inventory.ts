@@ -132,7 +132,7 @@ export async function listCategories(): Promise<Category[]> {
 }
 
 export async function createCategory(input: { nombre: string }) {
-  return apiFetch("/api/categories", { method: "POST", body: JSON.stringify(input) });
+  return apiFetch("/api/categories", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
 }
 
 export async function updateCategory(id: string, input: { nombre: string }) {
@@ -149,7 +149,7 @@ export async function listProducts(): Promise<Product[]> {
 }
 
 export async function createProduct(input: ProductInput) {
-  return apiFetch("/api/products", { method: "POST", body: JSON.stringify(input) });
+  return apiFetch("/api/products", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
 }
 
 export async function updateProduct(id: string, input: ProductInput) {
@@ -174,7 +174,7 @@ export async function listCustomers(): Promise<Customer[]> {
 }
 
 export async function createCustomer(input: CustomerInput): Promise<Customer> {
-  return apiFetch("/api/customers", { method: "POST", body: JSON.stringify(input) });
+  return apiFetch("/api/customers", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
 }
 
 export async function updateCustomer(id: string, input: CustomerInput): Promise<Customer> {
@@ -208,6 +208,7 @@ export async function createSale(input: {
       customer_id: input.customer_id,
       client_id: input.client_id ?? null,
     }),
+    timeoutMs: 3000,
   });
   return data.id;
 }

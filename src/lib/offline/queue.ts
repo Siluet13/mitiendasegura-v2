@@ -7,6 +7,11 @@ function idbRequest<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+    const tx = req.transaction;
+    if (tx) {
+      tx.onabort = () =>
+        reject(tx.error ?? new DOMException("Transaction aborted", "AbortError"));
+    }
   });
 }
 
@@ -62,7 +67,8 @@ export async function updateStatus(
       } else {
         delete updated.processingAt;
       }
-      st.put(updated);
+      const putReq = st.put(updated);
+      putReq.onerror = () => reject(putReq.error);
     };
 
     getReq.onerror = () => reject(getReq.error);

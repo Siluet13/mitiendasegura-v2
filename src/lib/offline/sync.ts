@@ -20,19 +20,28 @@ type OfflineSalePayload = {
 
 let isSyncing = false;
 
+async function safeUpdateStatus(
+  id: number,
+  status: "pending" | "processing",
+): Promise<void> {
+  try {
+    await updateStatus(id, status);
+  } catch {}
+}
+
 async function syncProducts(qc: QueryClient): Promise<{ synced: number; failed: number }> {
   const pending = (await listPending()).filter((op) => op.type === "product_create");
   let synced = 0;
   let failed = 0;
   for (const op of pending) {
     if (op.id == null) continue;
-    await updateStatus(op.id, "processing");
+    await safeUpdateStatus(op.id, "processing");
     try {
       await createProduct(op.payload as ProductInput);
       await dequeue(op.id);
       synced++;
     } catch {
-      await updateStatus(op.id, "pending");
+      await safeUpdateStatus(op.id, "pending");
       failed++;
     }
   }
@@ -46,13 +55,13 @@ async function syncCategories(qc: QueryClient): Promise<{ synced: number; failed
   let failed = 0;
   for (const op of pending) {
     if (op.id == null) continue;
-    await updateStatus(op.id, "processing");
+    await safeUpdateStatus(op.id, "processing");
     try {
       await createCategory(op.payload as { nombre: string });
       await dequeue(op.id);
       synced++;
     } catch {
-      await updateStatus(op.id, "pending");
+      await safeUpdateStatus(op.id, "pending");
       failed++;
     }
   }
@@ -69,13 +78,13 @@ async function syncCustomers(qc: QueryClient): Promise<{ synced: number; failed:
   let failed = 0;
   for (const op of pending) {
     if (op.id == null) continue;
-    await updateStatus(op.id, "processing");
+    await safeUpdateStatus(op.id, "processing");
     try {
       await createCustomer(op.payload as CustomerInput);
       await dequeue(op.id);
       synced++;
     } catch {
-      await updateStatus(op.id, "pending");
+      await safeUpdateStatus(op.id, "pending");
       failed++;
     }
   }
@@ -89,7 +98,7 @@ async function syncSales(qc: QueryClient): Promise<{ synced: number; failed: num
   let failed = 0;
   for (const op of pending) {
     if (op.id == null) continue;
-    await updateStatus(op.id, "processing");
+    await safeUpdateStatus(op.id, "processing");
     const p = op.payload as OfflineSalePayload;
     try {
       await createSale({
@@ -101,7 +110,7 @@ async function syncSales(qc: QueryClient): Promise<{ synced: number; failed: num
       await dequeue(op.id);
       synced++;
     } catch {
-      await updateStatus(op.id, "pending");
+      await safeUpdateStatus(op.id, "pending");
       failed++;
     }
   }
@@ -124,26 +133,38 @@ export async function syncAllPending(qc: QueryClient): Promise<void> {
     const all = await listPending();
     if (all.length === 0) return;
 
-    toastId = toast.loading(`Sincronizando ${all.length} operación${all.length !== 1 ? "es" : ""} pendiente${all.length !== 1 ? "s" : ""}…`);
+    toastId = toast.loading(
+      `Sincronizando ${all.length} operación${all.length !== 1 ? "es" : ""} pendiente${all.length !== 1 ? "s" : ""}…`,
+    );
 
-    const [cats, prods, custs, sales] = await Promise.all([
+    const [cats, prods, custs, sales] = await Promise.allSettled([
       syncCategories(qc),
       syncProducts(qc),
       syncCustomers(qc),
       syncSales(qc),
     ]);
 
-    const totalSynced = cats.synced + prods.synced + custs.synced + sales.synced;
-    const totalFailed = cats.failed + prods.failed + custs.failed + sales.failed;
+    const results = [cats, prods, custs, sales].map((r) =>
+      r.status === "fulfilled" ? r.value : { synced: 0, failed: 0 },
+    );
+
+    const totalSynced = results.reduce((s, r) => s + r.synced, 0);
+    const totalFailed = results.reduce((s, r) => s + r.failed, 0);
 
     toast.dismiss(toastId);
 
     if (totalSynced > 0 && totalFailed === 0) {
-      toast.success(`${totalSynced} operación${totalSynced !== 1 ? "es" : ""} sincronizada${totalSynced !== 1 ? "s" : ""} correctamente`);
+      toast.success(
+        `${totalSynced} operación${totalSynced !== 1 ? "es" : ""} sincronizada${totalSynced !== 1 ? "s" : ""} correctamente`,
+      );
     } else if (totalSynced === 0 && totalFailed > 0) {
-      toast.error(`${totalFailed} operación${totalFailed !== 1 ? "es" : ""} no pudieron sincronizarse. Se reintentarán al reconectar.`);
+      toast.error(
+        `${totalFailed} operación${totalFailed !== 1 ? "es" : ""} no pudieron sincronizarse. Se reintentarán al reconectar.`,
+      );
     } else if (totalSynced > 0 && totalFailed > 0) {
-      toast.warning(`${totalSynced} sincronizada${totalSynced !== 1 ? "s" : ""}, ${totalFailed} pendiente${totalFailed !== 1 ? "s" : ""} — se reintentarán al reconectar`);
+      toast.warning(
+        `${totalSynced} sincronizada${totalSynced !== 1 ? "s" : ""}, ${totalFailed} pendiente${totalFailed !== 1 ? "s" : ""} — se reintentarán al reconectar`,
+      );
     }
   } catch {
     toast.dismiss(toastId);

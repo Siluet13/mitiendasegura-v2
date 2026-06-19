@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const SHELL_CACHE = `mi-tienda-shell-${CACHE_VERSION}`;
 const ASSETS_CACHE = `mi-tienda-assets-${CACHE_VERSION}`;
 
@@ -15,7 +15,7 @@ const STATIC_PRECACHE = [
 
 function logAsset(status, pathname) {
   if (!pathname.startsWith('/assets/')) return;
-  console.log(`[SW v4] ${status.padEnd(20)} ${pathname}`);
+  console.log(`[SW ${CACHE_VERSION}] ${status.padEnd(20)} ${pathname}`);
 }
 
 async function listCaches() {
@@ -33,6 +33,8 @@ async function listCaches() {
 }
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
+
   event.waitUntil(
     fetch('/')
       .then(async (shellResponse) => {
@@ -48,13 +50,13 @@ self.addEventListener('install', (event) => {
           headers: { 'Content-Type': 'text/html; charset=utf-8' },
         }));
 
-        await Promise.all(
+        await Promise.allSettled(
           STATIC_PRECACHE.map((url) =>
             fetch(url).then((r) => (r.ok ? cache.put(url, r) : null)).catch(() => null)
           )
         );
 
-        await Promise.all(
+        await Promise.allSettled(
           discovered.map((url) =>
             fetch(url)
               .then((r) => {
@@ -69,11 +71,13 @@ self.addEventListener('install', (event) => {
           )
         );
 
-        console.log(`[SW v4] install: shell + ${STATIC_PRECACHE.length} static + ${discovered.length} asset bundles precached`);
+        console.log(`[SW ${CACHE_VERSION}] install: shell + ${STATIC_PRECACHE.length} static + ${discovered.length} asset bundles precached`);
       })
       .catch(() =>
         caches.open(SHELL_CACHE)
-          .then((cache) => cache.addAll([...STATIC_PRECACHE]).catch(() => {}))
+          .then((cache) => Promise.allSettled(STATIC_PRECACHE.map((url) =>
+            fetch(url).then((r) => r.ok ? cache.put(url, r) : null).catch(() => null)
+          )))
       )
   );
 });
