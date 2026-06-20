@@ -103,20 +103,6 @@ function CategoriesPage() {
         throw e;
       }
     },
-    onSuccess: (result) => {
-      if (result === null) {
-        toast.success("Categoría guardada localmente. Se sincronizará al reconectar.");
-        form.reset({ nombre: "" });
-        setOpen(false);
-        return;
-      }
-      qc.invalidateQueries({ queryKey: ["categories"] });
-      qc.invalidateQueries({ queryKey: ["products"] });
-      toast.success(editing ? "Categoría actualizada" : "Categoría creada");
-      form.reset({ nombre: "" });
-      setOpen(false);
-    },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   const delMut = useMutation({
@@ -185,7 +171,29 @@ function CategoriesPage() {
           <DialogHeader>
             <DialogTitle>{editing ? "Editar categoría" : "Nueva categoría"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit((v) => saveMut.mutate(v))} className="space-y-4">
+          <form onSubmit={form.handleSubmit(async (v) => {
+            log("MUTATION_START", { entity: "category", editing: !!editing });
+            try {
+              const result = await saveMut.mutateAsync(v);
+              log("MUTATION_SUCCESS", { entity: "category", offline: result === null });
+              if (result === null) {
+                toast.success("Categoría guardada localmente. Se sincronizará al reconectar.");
+              } else {
+                qc.invalidateQueries({ queryKey: ["categories"] });
+                qc.invalidateQueries({ queryKey: ["products"] });
+                toast.success(editing ? "Categoría actualizada" : "Categoría creada");
+              }
+              log("FORM_RESET", { entity: "category" });
+              form.reset({ nombre: "" });
+              log("DIALOG_CLOSE", { entity: "category" });
+              setOpen(false);
+            } catch (e) {
+              log("MUTATION_ERROR", { entity: "category", error: String(e) }, "error");
+              toast.error(e instanceof Error ? e.message : "Error al guardar");
+            } finally {
+              log("MUTATION_SETTLED", { entity: "category" });
+            }
+          })} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="nombre">Nombre</Label>
               <Input id="nombre" {...form.register("nombre")} autoFocus />

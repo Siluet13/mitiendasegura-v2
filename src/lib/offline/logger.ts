@@ -25,7 +25,13 @@ export type LogEvent =
   | "FETCH_TIMEOUT"
   | "FETCH_FAILED"
   | "RQ_CACHE_RESTORED"
-  | "RQ_CACHE_SAVED";
+  | "RQ_CACHE_SAVED"
+  | "MUTATION_START"
+  | "MUTATION_SUCCESS"
+  | "MUTATION_ERROR"
+  | "MUTATION_SETTLED"
+  | "DIALOG_CLOSE"
+  | "FORM_RESET";
 
 export interface LogEntry {
   timestamp: number;

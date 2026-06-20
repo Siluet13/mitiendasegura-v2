@@ -369,19 +369,6 @@ function NewSaleDialog({
         throw e;
       }
     },
-    onSuccess: ({ offline }) => {
-      if (offline) {
-        toast.info("Venta guardada localmente. Se sincronizará cuando vuelva la conexión.");
-      } else {
-        toast.success("Venta registrada");
-        onCreated();
-      }
-      setLines([]);
-      setCustomerId(NO_CUSTOMER);
-      form.reset({ observacion: "" });
-      onOpenChange(false);
-    },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   function handleOpenChange(v: boolean) {
@@ -413,7 +400,30 @@ function NewSaleDialog({
         </DialogHeader>
 
         <form
-          onSubmit={form.handleSubmit((v) => mut.mutate(v))}
+          onSubmit={form.handleSubmit(async (v) => {
+            log("MUTATION_START", { entity: "sale", itemCount: lines.length });
+            try {
+              const result = await mut.mutateAsync(v);
+              log("MUTATION_SUCCESS", { entity: "sale", offline: result.offline });
+              if (result.offline) {
+                toast.info("Venta guardada localmente. Se sincronizará cuando vuelva la conexión.");
+              } else {
+                toast.success("Venta registrada");
+                onCreated();
+              }
+              setLines([]);
+              setCustomerId(NO_CUSTOMER);
+              log("FORM_RESET", { entity: "sale" });
+              form.reset({ observacion: "" });
+              log("DIALOG_CLOSE", { entity: "sale" });
+              onOpenChange(false);
+            } catch (e) {
+              log("MUTATION_ERROR", { entity: "sale", error: String(e) }, "error");
+              toast.error(e instanceof Error ? e.message : "Error al registrar venta");
+            } finally {
+              log("MUTATION_SETTLED", { entity: "sale" });
+            }
+          })}
           className="flex flex-col gap-4 overflow-y-auto pr-1"
         >
           {/* ── POS Scanner ───────────────────────────────────────────────── */}

@@ -153,25 +153,6 @@ function CustomersPage() {
         throw e;
       }
     },
-    onSuccess: (result) => {
-      if (result === null) {
-        toast.success("Cliente guardado localmente. Se sincronizará al reconectar.");
-        setOpen(false);
-        return;
-      }
-      qc.invalidateQueries({ queryKey: ["customers"] });
-      toast.success(editing ? "Cliente actualizado" : "Cliente creado");
-      setOpen(false);
-    },
-    onError: (e: Error) => {
-      if (e.message.includes("customers_nombre_telefono_owner_unique")) {
-        toast.error("Ya existe un cliente con el mismo nombre y teléfono");
-      } else if (e.message.includes("customers_email_check")) {
-        toast.error("El email no es válido");
-      } else {
-        toast.error(e.message);
-      }
-    },
   });
 
   const delMut = useMutation({
@@ -276,7 +257,32 @@ function CustomersPage() {
           <DialogHeader>
             <DialogTitle>{editing ? "Editar cliente" : "Nuevo cliente"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit((v) => saveMut.mutate(v))} className="space-y-4">
+          <form onSubmit={form.handleSubmit(async (v) => {
+            log("MUTATION_START", { entity: "customer", editing: !!editing });
+            try {
+              const result = await saveMut.mutateAsync(v);
+              log("MUTATION_SUCCESS", { entity: "customer", offline: result === null });
+              if (result === null) {
+                toast.success("Cliente guardado localmente. Se sincronizará al reconectar.");
+              } else {
+                qc.invalidateQueries({ queryKey: ["customers"] });
+                toast.success(editing ? "Cliente actualizado" : "Cliente creado");
+              }
+              log("DIALOG_CLOSE", { entity: "customer" });
+              setOpen(false);
+            } catch (e) {
+              log("MUTATION_ERROR", { entity: "customer", error: String(e) }, "error");
+              if (e instanceof Error && e.message.includes("customers_nombre_telefono_owner_unique")) {
+                toast.error("Ya existe un cliente con el mismo nombre y teléfono");
+              } else if (e instanceof Error && e.message.includes("customers_email_check")) {
+                toast.error("El email no es válido");
+              } else {
+                toast.error(e instanceof Error ? e.message : "Error al guardar");
+              }
+            } finally {
+              log("MUTATION_SETTLED", { entity: "customer" });
+            }
+          })} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="nombre">

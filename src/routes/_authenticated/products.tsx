@@ -162,19 +162,6 @@ function ProductsPage() {
         throw e;
       }
     },
-    onSuccess: (result) => {
-      if (result === null) {
-        toast.success("Producto guardado localmente. Se sincronizará al reconectar.");
-        form.reset(defaults);
-        setOpen(false);
-        return;
-      }
-      qc.invalidateQueries({ queryKey: ["products"] });
-      toast.success(editing ? "Producto actualizado" : "Producto creado");
-      form.reset(defaults);
-      setOpen(false);
-    },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   const delMut = useMutation({
@@ -292,7 +279,28 @@ function ProductsPage() {
           <DialogHeader>
             <DialogTitle>{editing ? "Editar producto" : "Nuevo producto"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit((v) => saveMut.mutate(v))} className="space-y-4">
+          <form onSubmit={form.handleSubmit(async (v) => {
+            log("MUTATION_START", { entity: "product", editing: !!editing });
+            try {
+              const result = await saveMut.mutateAsync(v);
+              log("MUTATION_SUCCESS", { entity: "product", offline: result === null });
+              if (result === null) {
+                toast.success("Producto guardado localmente. Se sincronizará al reconectar.");
+              } else {
+                qc.invalidateQueries({ queryKey: ["products"] });
+                toast.success(editing ? "Producto actualizado" : "Producto creado");
+              }
+              log("FORM_RESET", { entity: "product" });
+              form.reset(defaults);
+              log("DIALOG_CLOSE", { entity: "product" });
+              setOpen(false);
+            } catch (e) {
+              log("MUTATION_ERROR", { entity: "product", error: String(e) }, "error");
+              toast.error(e instanceof Error ? e.message : "Error al guardar");
+            } finally {
+              log("MUTATION_SETTLED", { entity: "product" });
+            }
+          })} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="nombre">Nombre</Label>
