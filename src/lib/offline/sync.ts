@@ -30,17 +30,23 @@ async function safeUpdateStatus(
   } catch {}
 }
 
-async function syncProducts(qc: QueryClient): Promise<{ synced: number; failed: number }> {
+async function syncProducts(qc: QueryClient): Promise<{ synced: number; failed: number; idMap: Map<string, string> }> {
   const pending = (await listPending()).filter((op) => op.type === "product_create");
   let synced = 0;
   let failed = 0;
+  const idMap = new Map<string, string>();
   for (const op of pending) {
     if (op.id == null) continue;
     await safeUpdateStatus(op.id, "processing");
     try {
-      await createProduct(op.payload as ProductInput);
+      const payload = op.payload as ProductInput;
+      const result = await createProduct(payload);
       await dequeue(op.id);
-      log("PRODUCT_CREATE_SYNCED", { id: op.id, nombre: (op.payload as ProductInput)?.nombre });
+      if (payload.offline_id && result?.id) {
+        idMap.set(payload.offline_id, result.id);
+        log("PRODUCT_ID_MAPPED", { offlineId: payload.offline_id, realId: result.id });
+      }
+      log("PRODUCT_CREATE_SYNCED", { id: op.id, nombre: payload.nombre });
       synced++;
     } catch {
       await safeUpdateStatus(op.id, "pending");
@@ -48,7 +54,7 @@ async function syncProducts(qc: QueryClient): Promise<{ synced: number; failed: 
     }
   }
   if (synced > 0) qc.invalidateQueries({ queryKey: ["products"] });
-  return { synced, failed };
+  return { synced, failed, idMap };
 }
 
 async function syncCategories(qc: QueryClient): Promise<{ synced: number; failed: number }> {
@@ -96,7 +102,10 @@ async function syncCustomers(qc: QueryClient): Promise<{ synced: number; failed:
   return { synced, failed };
 }
 
-async function syncSales(qc: QueryClient): Promise<{ synced: number; failed: number }> {
+async function syncSales(
+  qc: QueryClient,
+  productIdMap: Map<string, string>,
+): Promise<{ synced: number; failed: number }> {
   const pending = (await listPending()).filter((op) => op.type === "sale");
   let synced = 0;
   let failed = 0;
@@ -104,15 +113,27 @@ async function syncSales(qc: QueryClient): Promise<{ synced: number; failed: num
     if (op.id == null) continue;
     await safeUpdateStatus(op.id, "processing");
     const p = op.payload as OfflineSalePayload;
+    const resolvedItems = p.items.map((item) => {
+      const realId = productIdMap.get(item.product_id);
+      if (realId) {
+        log("SALE_PRODUCT_ID_RESOLVED", {
+          saleId: op.id,
+          oldProductId: item.product_id,
+          newProductId: realId,
+        });
+        return { ...item, product_id: realId };
+      }
+      return item;
+    });
     log("SALE_SYNC_START", {
       id: op.id,
-      itemCount: p.items?.length,
+      itemCount: resolvedItems.length,
       client_id: p.client_id,
       customer_id: p.customer_id ?? null,
     });
     try {
       await createSale({
-        items: p.items,
+        items: resolvedItems,
         observacion: p.observacion ?? null,
         customer_id: p.customer_id ?? null,
         client_id: p.client_id,
@@ -167,16 +188,12 @@ export async function syncAllPending(qc: QueryClient, trigger: "auto" | "manual"
       `Sincronizando ${all.length} operación${all.length !== 1 ? "es" : ""} pendiente${all.length !== 1 ? "s" : ""}…`,
     );
 
-    const [cats, prods, custs, sales] = await Promise.allSettled([
-      syncCategories(qc),
-      syncProducts(qc),
-      syncCustomers(qc),
-      syncSales(qc),
-    ]);
+    const cats = await syncCategories(qc).catch(() => ({ synced: 0, failed: 0 }));
+    const prods = await syncProducts(qc).catch(() => ({ synced: 0, failed: 0, idMap: new Map<string, string>() }));
+    const custs = await syncCustomers(qc).catch(() => ({ synced: 0, failed: 0 }));
+    const sales = await syncSales(qc, prods.idMap).catch(() => ({ synced: 0, failed: 0 }));
 
-    const results = [cats, prods, custs, sales].map((r) =>
-      r.status === "fulfilled" ? r.value : { synced: 0, failed: 0 },
-    );
+    const results = [cats, prods, custs, sales];
 
     const totalSynced = results.reduce((s, r) => s + r.synced, 0);
     const totalFailed = results.reduce((s, r) => s + r.failed, 0);

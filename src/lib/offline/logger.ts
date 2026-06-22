@@ -38,7 +38,9 @@ export type LogEvent =
   | "RECONNECT_DETECTED"
   | "AUTO_SYNC_START"
   | "AUTO_SYNC_SUCCESS"
-  | "AUTO_SYNC_ERROR";
+  | "AUTO_SYNC_ERROR"
+  | "PRODUCT_ID_MAPPED"
+  | "SALE_PRODUCT_ID_RESOLVED";
 
 export interface LogEntry {
   timestamp: number;

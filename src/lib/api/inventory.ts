@@ -90,6 +90,7 @@ export type ProductInput = {
   stock_minimo: number;
   category_id?: string | null;
   activo: boolean;
+  offline_id?: string;
 };
 
 export type StockMovementInput = {
@@ -148,8 +149,8 @@ export async function listProducts(): Promise<Product[]> {
   return apiFetch("/api/products");
 }
 
-export async function createProduct(input: ProductInput) {
-  return apiFetch("/api/products", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
+export async function createProduct(input: ProductInput): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/api/products", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
 }
 
 export async function updateProduct(id: string, input: ProductInput) {

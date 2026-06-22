@@ -160,6 +160,7 @@ function OfflineDebugPage() {
         descripcion: null,
         sku: `SKU-TEST-${ts}`,
         codigo_barras: null,
+        offline_id: `TEST-${ts}`,
       });
       results.push(`✅ product_create enqueued → id: ${prodId}`);
     } catch (e) {
