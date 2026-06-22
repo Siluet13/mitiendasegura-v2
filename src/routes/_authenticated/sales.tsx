@@ -49,6 +49,13 @@ const NO_CUSTOMER = "__none__";
 
 type Line = { product_id: string; cantidad: number };
 
+type OfflineSalePayload = {
+  items: SaleItemInput[];
+  observacion?: string | null;
+  customer_id?: string | null;
+  client_id: string;
+};
+
 const fmt = (n: number) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(n);
 
@@ -338,7 +345,7 @@ function NewSaleDialog({
         customer_id: customerId !== NO_CUSTOMER ? customerId : null,
         client_id: clientId,
       };
-      const offlinePayload: OfflineSalePayload = {
+      const offlinePayload: OfflineSalePayload & { items_snapshot: unknown[]; total: number } = {
         items: saleInput.items,
         observacion: saleInput.observacion,
         customer_id: saleInput.customer_id,
@@ -350,7 +357,7 @@ function NewSaleDialog({
           precioUnitario: productMap.get(l.product_id)?.precio ?? null,
         })),
         total,
-      } as OfflineSalePayload & { items_snapshot: unknown[]; total: number };
+      };
       log("SALE_CREATE_START", { itemCount: lines.length, total });
       if (!isOnline || !navigator.onLine) {
         await enqueue("sale", offlinePayload);
@@ -371,14 +378,22 @@ function NewSaleDialog({
     },
   });
 
+  // BUG #1 FIX: handleOpenChange is the single exit point for closing the dialog.
+  // It resets all local state AND resets the mutation (mut.reset()), preventing
+  // isPending from staying true if the dialog reopens before TQ commits the update.
+  // The form submit now calls handleOpenChange(false) instead of onOpenChange(false)
+  // directly, so this cleanup always runs on close regardless of how it's triggered.
   function handleOpenChange(v: boolean) {
     if (!v) {
+      log("SALE_DIALOG_CLOSE", { isPending: mut.isPending });
       setLines([]);
       setPid("");
       setQty(1);
       setCustomerId(NO_CUSTOMER);
       setLastScanned(null);
       form.reset({ observacion: "" });
+      mut.reset();
+      log("SALE_DIALOG_CLOSED", {});
     }
     onOpenChange(v);
   }
@@ -404,24 +419,23 @@ function NewSaleDialog({
             log("MUTATION_START", { entity: "sale", itemCount: lines.length });
             try {
               const result = await mut.mutateAsync(v);
-              log("MUTATION_SUCCESS", { entity: "sale", offline: result.offline });
+              log("SALE_MUTATION_SUCCESS", { offline: result.offline });
               if (result.offline) {
                 toast.info("Venta guardada localmente. Se sincronizará cuando vuelva la conexión.");
               } else {
                 toast.success("Venta registrada");
                 onCreated();
               }
-              setLines([]);
-              setCustomerId(NO_CUSTOMER);
               log("FORM_RESET", { entity: "sale" });
-              form.reset({ observacion: "" });
-              log("DIALOG_CLOSE", { entity: "sale" });
-              onOpenChange(false);
+              // BUG #1 FIX: use handleOpenChange instead of onOpenChange directly.
+              // This guarantees local state + mut.reset() always run on close,
+              // regardless of whether Radix fires onOpenChange via the prop change.
+              handleOpenChange(false);
             } catch (e) {
               log("MUTATION_ERROR", { entity: "sale", error: String(e) }, "error");
               toast.error(e instanceof Error ? e.message : "Error al registrar venta");
             } finally {
-              log("MUTATION_SETTLED", { entity: "sale" });
+              log("SALE_MUTATION_SETTLED", { entity: "sale" });
             }
           })}
           className="flex flex-col gap-4 overflow-y-auto pr-1"
@@ -574,8 +588,8 @@ function NewSaleDialog({
               className={[
                 "tabular-nums font-bold tracking-tight transition-all",
                 lines.length > 0
-                  ? "text-3xl text-primary"
-                  : "text-2xl text-muted-foreground",
+                  ? "text-2xl text-primary"
+                  : "text-base text-muted-foreground",
               ].join(" ")}
             >
               {fmt(total)}
@@ -663,40 +677,36 @@ function SaleDetailDialog({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Producto</TableHead>
-                    <TableHead className="text-right">Precio</TableHead>
+                    <TableHead className="text-right">Precio unit.</TableHead>
                     <TableHead className="text-right">Cant.</TableHead>
                     <TableHead className="text-right">Subtotal</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.sale_items.map((it) => (
-                    <TableRow key={it.id}>
-                      <TableCell className="font-medium">{it.products?.nombre ?? "—"}</TableCell>
+                  {(data.sale_items ?? []).map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>{item.products?.nombre ?? item.productId}</TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {fmt(Number(it.precio_unitario))}
+                        {fmt(Number(item.precioUnitario))}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{it.cantidad}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {fmt(Number(it.subtotal))}
+                      <TableCell className="text-right tabular-nums">{item.cantidad}</TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {fmt(Number(item.subtotal))}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
-            <div className="flex items-center justify-between rounded-lg border-2 border-primary/25 bg-primary/5 px-4 py-3">
-              <span className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-                Total
-              </span>
-              <span className="text-3xl font-bold tabular-nums text-primary">
-                {fmt(Number(data.total))}
+            <div className="flex justify-end">
+              <span className="text-lg font-bold tabular-nums">
+                Total: {fmt(Number(data.total))}
               </span>
             </div>
             {data.observacion && (
-              <div className="text-sm">
-                <span className="text-muted-foreground">Observación: </span>
-                {data.observacion}
-              </div>
+              <p className="text-sm text-muted-foreground">
+                Observación: {data.observacion}
+              </p>
             )}
           </div>
         )}

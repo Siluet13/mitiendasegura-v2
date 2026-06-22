@@ -73,6 +73,10 @@ const defaults: FormValues = {
   activo: true,
 };
 
+// Prefix used to identify optimistic offline entries in the cache.
+// On sync, the real ID replaces this entry.
+const OFFLINE_ID_PREFIX = "offline_";
+
 function ProductsPage() {
   const qc = useQueryClient();
   const isOnline = useOnlineStatus();
@@ -129,7 +133,7 @@ function ProductsPage() {
   }
 
   const saveMut = useMutation({
-    mutationFn: async (values: FormValues) => {
+    mutationFn: async (values: FormValues): Promise<{ offlineId: string; payload: ProductInput } | { created: true }> => {
       const payload: ProductInput = {
         nombre: values.nombre,
         descripcion: values.descripcion?.trim() ? values.descripcion : null,
@@ -143,21 +147,28 @@ function ProductsPage() {
         activo: values.activo,
       };
       if (editing) {
-        return updateProduct(editing.id, payload);
+        await updateProduct(editing.id, payload);
+        return { created: true };
       }
       log("PRODUCT_CREATE_START", { nombre: payload.nombre });
       if (!isOnline || !navigator.onLine) {
-        await enqueue("product_create", payload);
-        log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, trigger: "offline" });
-        return null;
+        // BUG #2 FIX: generate a stable offline_id so the cache entry and the
+        // enqueued op share the same key. sync.ts uses this to build the idMap
+        // and invalidate once the real record exists server-side.
+        const offlineId = `${OFFLINE_ID_PREFIX}${crypto.randomUUID()}`;
+        await enqueue("product_create", { ...payload, offline_id: offlineId });
+        log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, offlineId, trigger: "offline" });
+        return { offlineId, payload };
       }
       try {
-        return await createProduct(payload);
+        await createProduct(payload);
+        return { created: true };
       } catch (e) {
         if (isNetworkError(e)) {
-          await enqueue("product_create", payload);
-          log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, trigger: "network_error" });
-          return null;
+          const offlineId = `${OFFLINE_ID_PREFIX}${crypto.randomUUID()}`;
+          await enqueue("product_create", { ...payload, offline_id: offlineId });
+          log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, offlineId, trigger: "network_error" });
+          return { offlineId, payload };
         }
         throw e;
       }
@@ -238,9 +249,17 @@ function ProductsPage() {
               filtered.map((p) => {
                 const ext = p as Product & { codigo_barras?: string | null; costo?: number | string };
                 const low = p.stock <= p.stock_minimo;
+                const isOffline = p.id.startsWith(OFFLINE_ID_PREFIX);
                 return (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-medium">{p.nombre}</TableCell>
+                  <TableRow key={p.id} className={isOffline ? "opacity-60" : undefined}>
+                    <TableCell className="font-medium">
+                      {p.nombre}
+                      {isOffline && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-xs text-amber-600">
+                          <WifiOff className="h-3 w-3" /> pendiente
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{p.sku ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{ext.codigo_barras ?? "—"}</TableCell>
                     <TableCell>{p.categories?.nombre ?? "—"}</TableCell>
@@ -258,10 +277,10 @@ function ProductsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button size="icon" variant="ghost" onClick={() => openEdit(p)}>
+                        <Button size="icon" variant="ghost" onClick={() => openEdit(p)} disabled={isOffline}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button size="icon" variant="ghost" onClick={() => setDeleting(p)}>
+                        <Button size="icon" variant="ghost" onClick={() => setDeleting(p)} disabled={isOffline}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -283,8 +302,42 @@ function ProductsPage() {
             log("MUTATION_START", { entity: "product", editing: !!editing });
             try {
               const result = await saveMut.mutateAsync(v);
-              log("MUTATION_SUCCESS", { entity: "product", offline: result === null });
-              if (result === null) {
+              if ("offlineId" in result) {
+                // BUG #2 FIX: inject a synthetic Product into the TanStack Query cache
+                // immediately so the product appears in the grid without waiting for sync.
+                // The entry is marked with the offline_id prefix (OFFLINE_ID_PREFIX) so the
+                // row renders with a "pendiente" badge and edit/delete are disabled.
+                // sync.ts will invalidateQueries(["products"]) after the real record is
+                // created server-side, replacing this entry with the canonical data.
+                const now = new Date().toISOString();
+                const categoryName = v.category_id && v.category_id !== NO_CAT
+                  ? categories.find((c) => c.id === v.category_id)?.nombre ?? null
+                  : null;
+                const optimisticProduct: Product = {
+                  id: result.offlineId,
+                  ownerId: "",
+                  categoryId: result.payload.category_id ?? null,
+                  category_id: result.payload.category_id ?? null,
+                  nombre: result.payload.nombre,
+                  descripcion: result.payload.descripcion ?? null,
+                  sku: result.payload.sku ?? null,
+                  codigoBarras: result.payload.codigo_barras ?? null,
+                  codigo_barras: result.payload.codigo_barras ?? null,
+                  precio: result.payload.precio,
+                  costo: result.payload.costo,
+                  stock: result.payload.stock,
+                  stockMinimo: result.payload.stock_minimo,
+                  stock_minimo: result.payload.stock_minimo,
+                  activo: result.payload.activo,
+                  createdAt: now,
+                  updatedAt: now,
+                  categories: categoryName ? { nombre: categoryName } : null,
+                };
+                qc.setQueryData<Product[]>(["products"], (old = []) => [
+                  ...old,
+                  optimisticProduct,
+                ]);
+                log("PRODUCT_CACHE_OPTIMISTIC", { offlineId: result.offlineId, nombre: result.payload.nombre });
                 toast.success("Producto guardado localmente. Se sincronizará al reconectar.");
               } else {
                 qc.invalidateQueries({ queryKey: ["products"] });
