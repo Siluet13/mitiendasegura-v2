@@ -104,6 +104,12 @@ async function syncSales(qc: QueryClient): Promise<{ synced: number; failed: num
     if (op.id == null) continue;
     await safeUpdateStatus(op.id, "processing");
     const p = op.payload as OfflineSalePayload;
+    log("SALE_SYNC_START", {
+      id: op.id,
+      itemCount: p.items?.length,
+      client_id: p.client_id,
+      customer_id: p.customer_id ?? null,
+    });
     try {
       await createSale({
         items: p.items,
@@ -112,10 +118,25 @@ async function syncSales(qc: QueryClient): Promise<{ synced: number; failed: num
         client_id: p.client_id,
       });
       await dequeue(op.id);
+      log("SALE_SYNC_SUCCESS", { id: op.id, itemCount: p.items?.length });
       log("SALE_CREATE_SYNCED", { id: op.id, itemCount: p.items?.length });
       synced++;
-    } catch {
+    } catch (e) {
       await safeUpdateStatus(op.id, "pending");
+      const errMsg = e instanceof Error ? e.message : String(e);
+      const errStack = e instanceof Error ? (e.stack ?? null) : null;
+      log(
+        "SALE_SYNC_ERROR",
+        {
+          id: op.id,
+          error: errMsg,
+          stack: errStack,
+          items: p.items,
+          client_id: p.client_id,
+          customer_id: p.customer_id ?? null,
+        },
+        "error",
+      );
       failed++;
     }
   }
@@ -127,12 +148,15 @@ async function syncSales(qc: QueryClient): Promise<{ synced: number; failed: num
   return { synced, failed };
 }
 
-export async function syncAllPending(qc: QueryClient): Promise<void> {
+export async function syncAllPending(qc: QueryClient, trigger: "auto" | "manual" = "manual"): Promise<void> {
   if (isSyncing) return;
   isSyncing = true;
 
   let toastId: string | number | undefined;
   try {
+    if (trigger === "auto") {
+      log("AUTO_SYNC_START", { trigger });
+    }
     await requeueProcessingOlderThan(10);
 
     const all = await listPending();
@@ -161,9 +185,11 @@ export async function syncAllPending(qc: QueryClient): Promise<void> {
 
     if (totalSynced > 0 || totalFailed === 0) {
       log("SYNC_SUCCESS", { synced: totalSynced, failed: totalFailed });
+      if (trigger === "auto") log("AUTO_SYNC_SUCCESS", { synced: totalSynced, failed: totalFailed });
     }
     if (totalFailed > 0) {
       log("SYNC_ERROR", { synced: totalSynced, failed: totalFailed }, "warn");
+      if (trigger === "auto") log("AUTO_SYNC_ERROR", { synced: totalSynced, failed: totalFailed }, "warn");
     }
 
     if (totalSynced > 0 && totalFailed === 0) {

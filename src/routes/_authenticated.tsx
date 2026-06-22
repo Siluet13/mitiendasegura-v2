@@ -10,6 +10,7 @@ import { useTenantEvents } from "@/hooks/useTenantEvents";
 import { useReconnect } from "@/hooks/useReconnect";
 import { syncAllPending } from "@/lib/offline/sync";
 import { listPending } from "@/lib/offline/queue";
+import { log } from "@/lib/offline/logger";
 import { Button } from "@/components/ui/button";
 import { ShieldX, WifiOff } from "lucide-react";
 
@@ -47,7 +48,7 @@ function AuthenticatedLayout() {
   const qc = useQueryClient();
   useTenantEvents();
 
-  const doSync = useCallback(() => syncAllPending(qc), [qc]);
+  const doSync = useCallback(() => syncAllPending(qc, "auto"), [qc]);
 
   // Cubre modo avión: dispara cuando navigator.onLine pasa de false → true
   useReconnect(doSync);
@@ -55,9 +56,13 @@ function AuthenticatedLayout() {
   // Cubre WiFi-sin-internet: el evento "online" dispara cuando el browser
   // detecta internet real, aunque navigator.onLine ya era true
   useEffect(() => {
-    window.addEventListener("online", doSync);
-    return () => window.removeEventListener("online", doSync);
-  }, [doSync]);
+    const handleOnline = () => {
+      log("RECONNECT_DETECTED", { via: "online_event", navigator_onLine: navigator.onLine });
+      syncAllPending(qc, "auto");
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [qc]);
 
   // Polling de respaldo: cada 20 s intenta sincronizar si hay ops pendientes
   useEffect(() => {

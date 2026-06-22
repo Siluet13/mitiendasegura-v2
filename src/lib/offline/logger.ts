@@ -31,7 +31,14 @@ export type LogEvent =
   | "MUTATION_ERROR"
   | "MUTATION_SETTLED"
   | "DIALOG_CLOSE"
-  | "FORM_RESET";
+  | "FORM_RESET"
+  | "SALE_SYNC_START"
+  | "SALE_SYNC_SUCCESS"
+  | "SALE_SYNC_ERROR"
+  | "RECONNECT_DETECTED"
+  | "AUTO_SYNC_START"
+  | "AUTO_SYNC_SUCCESS"
+  | "AUTO_SYNC_ERROR";
 
 export interface LogEntry {
   timestamp: number;
