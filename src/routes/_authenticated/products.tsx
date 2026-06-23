@@ -204,7 +204,7 @@ function ProductsPage() {
             </span>
           )}
         </div>
-        <Button onClick={openNew} className="gap-2">
+        <Button onClick={openNew} className="gap-2" disabled={saveMut.isPending}>
           <Plus className="h-4 w-4" /> Nuevo
         </Button>
       </div>
@@ -285,7 +285,7 @@ function ProductsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button size="icon" variant="ghost" onClick={() => openEdit(p)} disabled={isOffline}>
+                        <Button size="icon" variant="ghost" onClick={() => openEdit(p)} disabled={isOffline || saveMut.isPending}>
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button size="icon" variant="ghost" onClick={() => setDeleting(p)} disabled={isOffline}>

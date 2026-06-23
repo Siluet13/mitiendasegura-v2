@@ -404,7 +404,7 @@ function NewSaleDialog({
       setCustomerId(NO_CUSTOMER);
       setLastScanned(null);
       form.reset({ observacion: "" });
-      mut.reset();
+      if (!mut.isPending) mut.reset();
       log("SALE_DIALOG_CLOSED", {});
     }
     onOpenChange(v);

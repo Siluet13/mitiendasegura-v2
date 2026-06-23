@@ -99,7 +99,7 @@ function StockMovementsPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Movimientos de stock</h1>
-        <Button onClick={openNew} className="gap-2">
+        <Button onClick={openNew} className="gap-2" disabled={saveMut.isPending}>
           <Plus className="h-4 w-4" /> Nuevo movimiento
         </Button>
       </div>
