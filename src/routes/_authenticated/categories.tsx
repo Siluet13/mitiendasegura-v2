@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -71,11 +71,15 @@ function CategoriesPage() {
   });
 
   function openNew() {
+    log("FORM_OPEN", { entity: "category", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(null);
     form.reset({ nombre: "" });
     setOpen(true);
   }
   function openEdit(c: Category) {
+    log("FORM_OPEN", { entity: "category", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(c);
     form.reset({ nombre: c.nombre });
     setOpen(true);
@@ -104,6 +108,10 @@ function CategoriesPage() {
       }
     },
   });
+
+  useEffect(() => {
+    log("MUTATION_STATE_CHANGE", { entity: "category", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+  }, [saveMut.isPending, saveMut.status, saveMut.isSuccess, saveMut.isError]);
 
   const delMut = useMutation({
     mutationFn: (id: string) => deleteCategory(id),
@@ -174,7 +182,9 @@ function CategoriesPage() {
           <form onSubmit={form.handleSubmit(async (v) => {
             log("MUTATION_START", { entity: "category", editing: !!editing });
             try {
+              log("MUTATION_BEFORE_AWAIT", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
               const result = await saveMut.mutateAsync(v);
+              log("MUTATION_AFTER_AWAIT", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
               log("MUTATION_SUCCESS", { entity: "category", offline: result === null });
               if (result === null) {
                 toast.success("Categoría guardada localmente. Se sincronizará al reconectar.");
@@ -185,13 +195,14 @@ function CategoriesPage() {
               }
               log("FORM_RESET", { entity: "category" });
               form.reset({ nombre: "" });
+              log("FORM_CLOSE", { entity: "category", isPending: saveMut.isPending, status: saveMut.status, open });
               log("DIALOG_CLOSE", { entity: "category" });
               setOpen(false);
             } catch (e) {
               log("MUTATION_ERROR", { entity: "category", error: String(e) }, "error");
               toast.error(e instanceof Error ? e.message : "Error al guardar");
             } finally {
-              log("MUTATION_SETTLED", { entity: "category" });
+              log("MUTATION_SETTLED", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
             }
           })} className="space-y-4">
             <div className="space-y-2">

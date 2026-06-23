@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -110,11 +110,15 @@ function ProductsPage() {
   }, [products, search, catFilter]);
 
   function openNew() {
+    log("FORM_OPEN", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(null);
     form.reset(defaults);
     setOpen(true);
   }
   function openEdit(p: Product) {
+    log("FORM_OPEN", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(p);
     const ext = p as Product & { codigo_barras?: string | null; costo?: number | string };
     form.reset({
@@ -174,6 +178,10 @@ function ProductsPage() {
       }
     },
   });
+
+  useEffect(() => {
+    log("MUTATION_STATE_CHANGE", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+  }, [saveMut.isPending, saveMut.status, saveMut.isSuccess, saveMut.isError]);
 
   const delMut = useMutation({
     mutationFn: (id: string) => deleteProduct(id),
@@ -301,7 +309,9 @@ function ProductsPage() {
           <form onSubmit={form.handleSubmit(async (v) => {
             log("MUTATION_START", { entity: "product", editing: !!editing });
             try {
+              log("MUTATION_BEFORE_AWAIT", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
               const result = await saveMut.mutateAsync(v);
+              log("MUTATION_AFTER_AWAIT", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
               if ("offlineId" in result) {
                 // BUG #2 FIX: inject a synthetic Product into the TanStack Query cache
                 // immediately so the product appears in the grid without waiting for sync.
@@ -345,13 +355,14 @@ function ProductsPage() {
               }
               log("FORM_RESET", { entity: "product" });
               form.reset(defaults);
+              log("FORM_CLOSE", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, open });
               log("DIALOG_CLOSE", { entity: "product" });
               setOpen(false);
             } catch (e) {
               log("MUTATION_ERROR", { entity: "product", error: String(e) }, "error");
               toast.error(e instanceof Error ? e.message : "Error al guardar");
             } finally {
-              log("MUTATION_SETTLED", { entity: "product" });
+              log("MUTATION_SETTLED", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
             }
           })} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { Building2, DollarSign, ImageIcon, Info, Save } from "lucide-react";
 import { getBusinessSettings, upsertBusinessSettings } from "@/lib/api/settings";
+import { log } from "@/lib/offline/logger";
 import type { BusinessSettingsInput } from "@/lib/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,6 +130,10 @@ function SettingsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  useEffect(() => {
+    log("MUTATION_STATE_CHANGE", { entity: "settings", isPending: mut.isPending, status: mut.status, isSuccess: mut.isSuccess, isError: mut.isError });
+  }, [mut.isPending, mut.status, mut.isSuccess, mut.isError]);
+
   const logoUrl = watch("logo_url");
 
   if (isLoading) {
@@ -150,7 +155,10 @@ function SettingsPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit((v) => mut.mutate(v))} className="space-y-6">
+      <form onSubmit={handleSubmit((v) => {
+        log("MUTATION_BEFORE_AWAIT", { entity: "settings", isPending: mut.isPending, status: mut.status });
+        mut.mutate(v);
+      })} className="space-y-6">
 
         {/* ── Datos del negocio ─────────────────────────────────────────── */}
         <Card>

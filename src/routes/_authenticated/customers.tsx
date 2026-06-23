@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -107,12 +107,16 @@ function CustomersPage() {
   }, [customers, search]);
 
   function openNew() {
+    log("FORM_OPEN", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(null);
     form.reset(defaults);
     setOpen(true);
   }
 
   function openEdit(c: Customer) {
+    log("FORM_OPEN", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(c);
     form.reset({
       nombre: c.nombre,
@@ -154,6 +158,10 @@ function CustomersPage() {
       }
     },
   });
+
+  useEffect(() => {
+    log("MUTATION_STATE_CHANGE", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+  }, [saveMut.isPending, saveMut.status, saveMut.isSuccess, saveMut.isError]);
 
   const delMut = useMutation({
     mutationFn: (id: string) => deleteCustomer(id),
@@ -260,7 +268,9 @@ function CustomersPage() {
           <form onSubmit={form.handleSubmit(async (v) => {
             log("MUTATION_START", { entity: "customer", editing: !!editing });
             try {
+              log("MUTATION_BEFORE_AWAIT", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
               const result = await saveMut.mutateAsync(v);
+              log("MUTATION_AFTER_AWAIT", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
               log("MUTATION_SUCCESS", { entity: "customer", offline: result === null });
               if (result === null) {
                 toast.success("Cliente guardado localmente. Se sincronizará al reconectar.");
@@ -268,6 +278,7 @@ function CustomersPage() {
                 qc.invalidateQueries({ queryKey: ["customers"] });
                 toast.success(editing ? "Cliente actualizado" : "Cliente creado");
               }
+              log("FORM_CLOSE", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status, open });
               log("DIALOG_CLOSE", { entity: "customer" });
               setOpen(false);
             } catch (e) {
@@ -280,7 +291,7 @@ function CustomersPage() {
                 toast.error(e instanceof Error ? e.message : "Error al guardar");
               }
             } finally {
-              log("MUTATION_SETTLED", { entity: "customer" });
+              log("MUTATION_SETTLED", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
             }
           })} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

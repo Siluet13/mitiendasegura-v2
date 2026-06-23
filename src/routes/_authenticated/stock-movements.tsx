@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import {
   listStockMovements,
   type StockMovementInput,
 } from "@/lib/api/inventory";
+import { log } from "@/lib/offline/logger";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +64,8 @@ function StockMovementsPage() {
   const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: defaults });
 
   function openNew() {
+    log("FORM_OPEN", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status });
     form.reset(defaults);
     setOpen(true);
   }
@@ -81,10 +84,16 @@ function StockMovementsPage() {
       qc.invalidateQueries({ queryKey: ["stock_movements"] });
       qc.invalidateQueries({ queryKey: ["products"] });
       toast.success("Movimiento registrado");
+      log("MUTATION_SETTLED", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status });
+      log("FORM_CLOSE", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status, open });
       setOpen(false);
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  useEffect(() => {
+    log("MUTATION_STATE_CHANGE", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+  }, [saveMut.isPending, saveMut.status, saveMut.isSuccess, saveMut.isError]);
 
   return (
     <div className="space-y-4">
@@ -164,7 +173,10 @@ function StockMovementsPage() {
           <DialogHeader>
             <DialogTitle>Nuevo movimiento</DialogTitle>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit((v) => saveMut.mutate(v))} className="space-y-4">
+          <form onSubmit={form.handleSubmit((v) => {
+            log("MUTATION_BEFORE_AWAIT", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status });
+            saveMut.mutate(v);
+          })} className="space-y-4">
             <div className="space-y-2">
               <Label>Producto</Label>
               <Select

@@ -378,6 +378,17 @@ function NewSaleDialog({
     },
   });
 
+  useEffect(() => {
+    if (open) {
+      const label = mut.status !== "idle" ? "FORM_REOPEN" : "FORM_OPEN";
+      log(label, { entity: "sale", isPending: mut.isPending, status: mut.status, isSuccess: mut.isSuccess, isError: mut.isError });
+    }
+  }, [open, mut.status]);
+
+  useEffect(() => {
+    log("MUTATION_STATE_CHANGE", { entity: "sale", isPending: mut.isPending, status: mut.status, isSuccess: mut.isSuccess, isError: mut.isError });
+  }, [mut.isPending, mut.status, mut.isSuccess, mut.isError]);
+
   // BUG #1 FIX: handleOpenChange is the single exit point for closing the dialog.
   // It resets all local state AND resets the mutation (mut.reset()), preventing
   // isPending from staying true if the dialog reopens before TQ commits the update.
@@ -386,6 +397,7 @@ function NewSaleDialog({
   function handleOpenChange(v: boolean) {
     if (!v) {
       log("SALE_DIALOG_CLOSE", { isPending: mut.isPending });
+      log("FORM_CLOSE", { entity: "sale", isPending: mut.isPending, status: mut.status, open });
       setLines([]);
       setPid("");
       setQty(1);
@@ -418,7 +430,9 @@ function NewSaleDialog({
           onSubmit={form.handleSubmit(async (v) => {
             log("MUTATION_START", { entity: "sale", itemCount: lines.length });
             try {
+              log("MUTATION_BEFORE_AWAIT", { entity: "sale", isPending: mut.isPending, status: mut.status });
               const result = await mut.mutateAsync(v);
+              log("MUTATION_AFTER_AWAIT", { entity: "sale", isPending: mut.isPending, status: mut.status });
               log("SALE_MUTATION_SUCCESS", { offline: result.offline });
               if (result.offline) {
                 toast.info("Venta guardada localmente. Se sincronizará cuando vuelva la conexión.");
@@ -435,7 +449,7 @@ function NewSaleDialog({
               log("MUTATION_ERROR", { entity: "sale", error: String(e) }, "error");
               toast.error(e instanceof Error ? e.message : "Error al registrar venta");
             } finally {
-              log("SALE_MUTATION_SETTLED", { entity: "sale" });
+              log("SALE_MUTATION_SETTLED", { entity: "sale", isPending: mut.isPending, status: mut.status });
             }
           })}
           className="flex flex-col gap-4 overflow-y-auto pr-1"
