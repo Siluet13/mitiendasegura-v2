@@ -162,6 +162,7 @@ function ProductsPage() {
         const offlineId = `${OFFLINE_ID_PREFIX}${crypto.randomUUID()}`;
         await enqueue("product_create", { ...payload, offline_id: offlineId });
         log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, offlineId, trigger: "offline" });
+        log("OFFLINE_RETURN_START", { entity: "product", trigger: "offline" });
         return { offlineId, payload };
       }
       try {
@@ -172,6 +173,7 @@ function ProductsPage() {
           const offlineId = `${OFFLINE_ID_PREFIX}${crypto.randomUUID()}`;
           await enqueue("product_create", { ...payload, offline_id: offlineId });
           log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, offlineId, trigger: "network_error" });
+          log("OFFLINE_RETURN_START", { entity: "product", trigger: "network_error" });
           return { offlineId, payload };
         }
         throw e;
@@ -180,8 +182,8 @@ function ProductsPage() {
   });
 
   useEffect(() => {
-    log("MUTATION_STATE_CHANGE", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
-  }, [saveMut.isPending, saveMut.status, saveMut.isSuccess, saveMut.isError]);
+    log("MUTATION_STATE_CHANGE", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError, isPaused: saveMut.isPaused });
+  }, [saveMut.isPending, saveMut.status, saveMut.isSuccess, saveMut.isError, saveMut.isPaused]);
 
   const delMut = useMutation({
     mutationFn: (id: string) => deleteProduct(id),
@@ -312,6 +314,7 @@ function ProductsPage() {
               log("MUTATION_BEFORE_AWAIT", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
               const result = await saveMut.mutateAsync(v);
               log("MUTATION_AFTER_AWAIT", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
+              log("AFTER_MUTATE_ASYNC", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isPaused: saveMut.isPaused });
               if ("offlineId" in result) {
                 // BUG #2 FIX: inject a synthetic Product into the TanStack Query cache
                 // immediately so the product appears in the grid without waiting for sync.
