@@ -140,7 +140,7 @@ function StockMovementsPage() {
               movements.map((m) => (
                 <TableRow key={m.id}>
                   <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                    {new Date(m.created_at).toLocaleString()}
+                    {new Date(m.createdAt).toLocaleString()}
                   </TableCell>
                   <TableCell className="font-medium">
                     {m.products?.nombre ?? "—"}

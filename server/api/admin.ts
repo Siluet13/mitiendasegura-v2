@@ -84,7 +84,7 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   app.put("/api/admin/licenses/:ownerId", isAuthenticated, isAdmin, async (req, res) => {
-    const { ownerId } = req.params;
+    const ownerId = String(req.params.ownerId);
     const { status, notes, expiresAt } = req.body as {
       status: LicenseStatus;
       notes?: string;

@@ -46,11 +46,12 @@ export function registerInventoryRoutes(app: Express): void {
   app.put("/api/categories/:id", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
     const { nombre } = req.body;
     const [row] = await db
       .update(categories)
       .set({ nombre, updatedAt: new Date() })
-      .where(and(eq(categories.id, req.params.id), eq(categories.tenantId, tenantId)))
+      .where(and(eq(categories.id, id), eq(categories.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
     broadcast(tenantId, { type: "invalidate", entities: ["categories"] });
@@ -60,9 +61,10 @@ export function registerInventoryRoutes(app: Express): void {
   app.delete("/api/categories/:id", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
     await db
       .delete(categories)
-      .where(and(eq(categories.id, req.params.id), eq(categories.tenantId, tenantId)));
+      .where(and(eq(categories.id, id), eq(categories.tenantId, tenantId)));
     res.json({ ok: true });
   });
 
@@ -123,6 +125,7 @@ export function registerInventoryRoutes(app: Express): void {
   app.put("/api/products/:id", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
     const body = req.body;
     const [row] = await db
       .update(products)
@@ -139,7 +142,7 @@ export function registerInventoryRoutes(app: Express): void {
         activo: body.activo ?? true,
         updatedAt: new Date(),
       })
-      .where(and(eq(products.id, req.params.id), eq(products.tenantId, tenantId)))
+      .where(and(eq(products.id, id), eq(products.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
     broadcast(tenantId, { type: "invalidate", entities: ["products"] });
@@ -149,9 +152,10 @@ export function registerInventoryRoutes(app: Express): void {
   app.delete("/api/products/:id", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
     await db
       .delete(products)
-      .where(and(eq(products.id, req.params.id), eq(products.tenantId, tenantId)));
+      .where(and(eq(products.id, id), eq(products.tenantId, tenantId)));
     res.json({ ok: true });
   });
 
@@ -190,6 +194,7 @@ export function registerInventoryRoutes(app: Express): void {
   app.put("/api/customers/:id", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
     const body = req.body;
     const [row] = await db
       .update(customers)
@@ -200,7 +205,7 @@ export function registerInventoryRoutes(app: Express): void {
         direccion: body.direccion ?? null,
         observaciones: body.observaciones ?? null,
       })
-      .where(and(eq(customers.id, req.params.id), eq(customers.tenantId, tenantId)))
+      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
     broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
@@ -210,9 +215,10 @@ export function registerInventoryRoutes(app: Express): void {
   app.delete("/api/customers/:id", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
     await db
       .delete(customers)
-      .where(and(eq(customers.id, req.params.id), eq(customers.tenantId, tenantId)));
+      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)));
     res.json({ ok: true });
   });
 
@@ -231,10 +237,11 @@ export function registerInventoryRoutes(app: Express): void {
   app.get("/api/sales/:id", isAuthenticated, async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
     const [sale] = await db
       .select()
       .from(sales)
-      .where(and(eq(sales.id, req.params.id), eq(sales.tenantId, tenantId)));
+      .where(and(eq(sales.id, id), eq(sales.tenantId, tenantId)));
     if (!sale) return res.status(404).json({ message: "No encontrado" });
 
     const items = await db

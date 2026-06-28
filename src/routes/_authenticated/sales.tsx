@@ -137,11 +137,11 @@ function SalesPage() {
               </TableRow>
             ) : (
               sales.map((s) => {
-                const clienteNombre = s.customer_id ? customerMap.get(s.customer_id) : undefined;
+                const clienteNombre = s.customerId ? customerMap.get(s.customerId) : undefined;
                 return (
                   <TableRow key={s.id}>
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                      {new Date(s.created_at).toLocaleString()}
+                      {new Date(s.createdAt).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-sm">
                       {clienteNombre ? (
@@ -663,7 +663,7 @@ function SaleDetailDialog({
     enabled: !!id,
   });
 
-  const clienteNombre = data?.customer_id ? customerMap.get(data.customer_id) : undefined;
+  const clienteNombre = data?.customerId ? customerMap.get(data.customerId) : undefined;
 
   return (
     <Dialog open={!!id} onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -677,7 +677,7 @@ function SaleDetailDialog({
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">
-                {new Date(data.created_at).toLocaleString()}
+                {new Date(data.createdAt).toLocaleString()}
               </span>
               {clienteNombre && (
                 <span className="flex items-center gap-1 font-medium">
