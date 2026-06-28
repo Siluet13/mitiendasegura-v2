@@ -45,6 +45,7 @@ export type Sale = {
   ownerId: string;
   userId: string;
   customerId: string | null;
+  receiptNumber: string | null;
   total: string | number;
   observacion: string | null;
   createdAt: string;
@@ -201,7 +202,7 @@ export async function createSale(input: {
   customer_id?: string | null;
   client_id?: string | null;
 }) {
-  const data = await apiFetch<{ id: string }>("/api/sales", {
+  return apiFetch<{ id: string; receiptNumber: string | null }>("/api/sales", {
     method: "POST",
     body: JSON.stringify({
       items: input.items,
@@ -211,7 +212,6 @@ export async function createSale(input: {
     }),
     timeoutMs: 3000,
   });
-  return data.id;
 }
 
 // ── Stock Movements ───────────────────────────────────────────────────────────

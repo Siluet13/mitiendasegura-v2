@@ -37,6 +37,7 @@ import {
   type PosScannerInputHandle,
 } from "@/components/sales/PosScannerInput";
 import { LastScannedPanel } from "@/components/sales/LastScannedPanel";
+import { ReceiptDialog } from "@/components/receipts/ReceiptDialog";
 
 export const Route = createFileRoute("/_authenticated/sales")({
   head: () => ({ meta: [{ title: "Ventas" }] }),
@@ -73,6 +74,11 @@ function SalesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [pendingReceipt, setPendingReceipt] = useState<{
+    saleId: string;
+    receiptNumber: string | null;
+    customerId: string | null;
+  } | null>(null);
 
   const { data: sales = [], isLoading } = useQuery({ queryKey: ["sales"], queryFn: listSales });
   const { data: products = [] } = useQuery({ queryKey: ["products"], queryFn: listProducts });
@@ -182,9 +188,23 @@ function SalesPage() {
           qc.invalidateQueries({ queryKey: ["products"] });
           qc.invalidateQueries({ queryKey: ["stock_movements"] });
         }}
+        onSaleCompleted={(saleId, receiptNumber, cid) => {
+          setPendingReceipt({ saleId, receiptNumber, customerId: cid });
+        }}
       />
 
       <SaleDetailDialog id={detailId} onClose={() => setDetailId(null)} customerMap={customerMap} />
+
+      <ReceiptDialog
+        saleId={pendingReceipt?.saleId ?? null}
+        receiptNumber={pendingReceipt?.receiptNumber ?? null}
+        customerName={
+          pendingReceipt?.customerId
+            ? (customerMap.get(pendingReceipt.customerId) ?? null)
+            : null
+        }
+        onClose={() => setPendingReceipt(null)}
+      />
     </div>
   );
 }
@@ -196,12 +216,14 @@ function NewSaleDialog({
   products,
   customers,
   onCreated,
+  onSaleCompleted,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   products: Product[];
   customers: Customer[];
   onCreated: () => void;
+  onSaleCompleted?: (saleId: string, receiptNumber: string | null, customerId: string | null) => void;
 }) {
   const [lines, setLines] = useState<Line[]>([]);
   const [pid, setPid] = useState<string>("");
@@ -365,8 +387,8 @@ function NewSaleDialog({
         return { offline: true as const };
       }
       try {
-        await createSale(saleInput);
-        return { offline: false as const };
+        const saleResult = await createSale(saleInput);
+        return { offline: false as const, saleId: saleResult.id, receiptNumber: saleResult.receiptNumber };
       } catch (e) {
         if (isNetworkError(e)) {
           await enqueue("sale", offlinePayload);
@@ -439,6 +461,11 @@ function NewSaleDialog({
               } else {
                 toast.success("Venta registrada");
                 onCreated();
+                onSaleCompleted?.(
+                  result.saleId,
+                  result.receiptNumber,
+                  customerId !== NO_CUSTOMER ? customerId : null,
+                );
               }
               log("FORM_RESET", { entity: "sale" });
               // BUG #1 FIX: use handleOpenChange instead of onOpenChange directly.

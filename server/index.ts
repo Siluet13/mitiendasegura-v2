@@ -9,6 +9,7 @@ import { registerBackupRoutes } from "./api/backup";
 import { registerLicenseRoutes } from "./api/license";
 import { registerAdminRoutes } from "./api/admin";
 import { registerEventsRoutes } from "./api/events";
+import { registerReceiptsRoutes } from "./api/receipts";
 import { checkLicense } from "./middleware/license";
 import { resolveTenant } from "./middleware/tenant";
 
@@ -46,6 +47,7 @@ if (existsSync(clientDir)) {
   registerInventoryRoutes(app);
   registerDashboardRoutes(app);
   registerSettingsRoutes(app);
+  registerReceiptsRoutes(app);
   registerBackupRoutes(app);
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));

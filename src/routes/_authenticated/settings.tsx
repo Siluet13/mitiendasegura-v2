@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Building2, DollarSign, ImageIcon, Info, Save } from "lucide-react";
+import { Building2, DollarSign, FileText, Hash, ImageIcon, Info, Save } from "lucide-react";
 import { getBusinessSettings, upsertBusinessSettings } from "@/lib/api/settings";
+import { getReceiptSettings, upsertReceiptSettings } from "@/lib/api/receipts";
 import { log } from "@/lib/offline/logger";
 import type { BusinessSettingsInput } from "@/lib/api/settings";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,10 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({ meta: [{ title: "Configuración del Negocio" }] }),
@@ -387,6 +392,347 @@ function SettingsPage() {
         </div>
 
       </form>
+
+      <ReceiptSettingsSection />
+    </div>
+  );
+}
+
+// ── Receipt Settings Section ───────────────────────────────────────────────────
+
+const receiptSchema = z.object({
+  habilitado:           z.boolean(),
+  mostrar_dialogo:      z.boolean(),
+  impresion_automatica: z.boolean(),
+  descarga_automatica:  z.boolean(),
+  tipo_comprobante:     z.enum(["ticket_58mm", "ticket_80mm", "a4"]),
+  prefijo_numeracion:   z.string().trim().min(1).max(10),
+  proximo_numero:       z.coerce.number().int().min(1),
+  nombre_comercial:     z.string().trim().max(200).optional(),
+  razon_social:         z.string().trim().max(200).optional(),
+  cuit:                 z.string().trim().max(30).optional(),
+  domicilio:            z.string().trim().max(300).optional(),
+  telefono:             z.string().trim().max(50).optional(),
+  email:                z.union([z.string().email("Email inválido"), z.literal("")]).optional(),
+  sitio_web:            z.string().trim().max(200).optional(),
+  logo_url:             z.union([z.string().url("URL inválida"), z.literal("")]).optional(),
+  mensaje_pie:          z.string().trim().max(500).optional(),
+});
+
+type ReceiptFormValues = z.infer<typeof receiptSchema>;
+
+const RECEIPT_DEFAULTS: ReceiptFormValues = {
+  habilitado:           false,
+  mostrar_dialogo:      true,
+  impresion_automatica: false,
+  descarga_automatica:  false,
+  tipo_comprobante:     "ticket_80mm",
+  prefijo_numeracion:   "V",
+  proximo_numero:       1,
+  nombre_comercial:     "",
+  razon_social:         "",
+  cuit:                 "",
+  domicilio:            "",
+  telefono:             "",
+  email:                "",
+  sitio_web:            "",
+  logo_url:             "",
+  mensaje_pie:          "",
+};
+
+function ReceiptSettingsSection() {
+  const qc = useQueryClient();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["receipt_settings"],
+    queryFn: getReceiptSettings,
+    staleTime: 300_000,
+  });
+
+  const {
+    control,
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    formState: { errors },
+  } = useForm<ReceiptFormValues>({
+    resolver: zodResolver(receiptSchema),
+    defaultValues: RECEIPT_DEFAULTS,
+  });
+
+  useEffect(() => {
+    if (!data) return;
+    reset({
+      habilitado:           data.habilitado ?? false,
+      mostrar_dialogo:      data.mostrar_dialogo ?? true,
+      impresion_automatica: data.impresion_automatica ?? false,
+      descarga_automatica:  data.descarga_automatica ?? false,
+      tipo_comprobante:     (data.tipo_comprobante as ReceiptFormValues["tipo_comprobante"]) ?? "ticket_80mm",
+      prefijo_numeracion:   data.prefijo_numeracion ?? "V",
+      proximo_numero:       data.proximo_numero ?? 1,
+      nombre_comercial:     data.nombre_comercial ?? "",
+      razon_social:         data.razon_social ?? "",
+      cuit:                 data.cuit ?? "",
+      domicilio:            data.domicilio ?? "",
+      telefono:             data.telefono ?? "",
+      email:                data.email ?? "",
+      sitio_web:            data.sitio_web ?? "",
+      logo_url:             data.logo_url ?? "",
+      mensaje_pie:          data.mensaje_pie ?? "",
+    });
+  }, [data, reset]);
+
+  const mut = useMutation({
+    mutationFn: (values: ReceiptFormValues) => {
+      return upsertReceiptSettings({
+        habilitado:           values.habilitado,
+        mostrar_dialogo:      values.mostrar_dialogo,
+        impresion_automatica: values.impresion_automatica,
+        descarga_automatica:  values.descarga_automatica,
+        tipo_comprobante:     values.tipo_comprobante,
+        prefijo_numeracion:   values.prefijo_numeracion,
+        proximo_numero:       values.proximo_numero,
+        nombre_comercial:     values.nombre_comercial?.trim() || null,
+        razon_social:         values.razon_social?.trim() || null,
+        cuit:                 values.cuit?.trim() || null,
+        domicilio:            values.domicilio?.trim() || null,
+        telefono:             values.telefono?.trim() || null,
+        email:                values.email?.trim() || null,
+        sitio_web:            values.sitio_web?.trim() || null,
+        logo_url:             values.logo_url?.trim() || null,
+        mensaje_pie:          values.mensaje_pie?.trim() || null,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Configuración de comprobantes guardada");
+      qc.invalidateQueries({ queryKey: ["receipt_settings"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const habilitado = watch("habilitado");
+
+  if (isLoading) {
+    return <Skeleton className="h-48 w-full" />;
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit((v) => mut.mutate(v))}
+      className="space-y-6 pb-6"
+    >
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" />
+            Comprobantes
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+
+          {/* Activar comprobantes */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-sm">Activar comprobantes</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Al registrar una venta se asignará un número y se podrá imprimir o descargar.
+              </p>
+            </div>
+            <Controller
+              control={control}
+              name="habilitado"
+              render={({ field }) => (
+                <Switch checked={field.value} onCheckedChange={field.onChange} />
+              )}
+            />
+          </div>
+
+          {habilitado && (
+            <>
+              <Separator />
+
+              {/* Comportamiento post-venta */}
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider text-xs">
+                  Comportamiento post-venta
+                </p>
+                <SwitchRow
+                  control={control}
+                  name="mostrar_dialogo"
+                  label="Mostrar diálogo de comprobante"
+                  description="Abre automáticamente el comprobante luego de cada venta."
+                />
+                <SwitchRow
+                  control={control}
+                  name="impresion_automatica"
+                  label="Imprimir automáticamente"
+                  description="Lanza la impresión sin que el usuario tenga que hacer clic."
+                />
+                <SwitchRow
+                  control={control}
+                  name="descarga_automatica"
+                  label="Descargar PDF automáticamente"
+                  description="Genera y descarga el PDF luego de cada venta."
+                />
+              </div>
+
+              <Separator />
+
+              {/* Formato y numeración */}
+              <div className="space-y-4">
+                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider text-xs">
+                  Formato y numeración
+                </p>
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="tipo_comprobante">Formato</Label>
+                    <Controller
+                      control={control}
+                      name="tipo_comprobante"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger id="tipo_comprobante">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ticket_58mm">Ticket 58mm</SelectItem>
+                            <SelectItem value="ticket_80mm">Ticket 80mm</SelectItem>
+                            <SelectItem value="a4">A4</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="prefijo_numeracion">Prefijo</Label>
+                    <Input
+                      id="prefijo_numeracion"
+                      placeholder="V"
+                      {...register("prefijo_numeracion")}
+                    />
+                    {errors.prefijo_numeracion && (
+                      <p className="text-xs text-destructive">{errors.prefijo_numeracion.message}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="proximo_numero" className="flex items-center gap-1">
+                      <Hash className="h-3 w-3" />
+                      Próximo número
+                    </Label>
+                    <Input
+                      id="proximo_numero"
+                      type="number"
+                      min={1}
+                      {...register("proximo_numero")}
+                    />
+                    <p className="text-xs text-muted-foreground">El próximo comprobante tendrá este número.</p>
+                    {errors.proximo_numero && (
+                      <p className="text-xs text-destructive">{errors.proximo_numero.message}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Datos del emisor */}
+              <div className="space-y-4">
+                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider text-xs">
+                  Datos del emisor (opcionales — si no se completan se usan los del negocio)
+                </p>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="r_nombre_comercial">Nombre comercial</Label>
+                    <Input id="r_nombre_comercial" placeholder="Igual al del negocio" {...register("nombre_comercial")} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="r_razon_social">Razón social</Label>
+                    <Input id="r_razon_social" {...register("razon_social")} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="r_cuit">CUIT</Label>
+                    <Input id="r_cuit" placeholder="20-12345678-9" {...register("cuit")} />
+                  </div>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="r_domicilio">Domicilio</Label>
+                    <Input id="r_domicilio" {...register("domicilio")} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="r_telefono">Teléfono</Label>
+                    <Input id="r_telefono" {...register("telefono")} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="r_email">Email</Label>
+                    <Input id="r_email" type="email" {...register("email")} />
+                    {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="r_sitio_web">Sitio web</Label>
+                    <Input id="r_sitio_web" placeholder="https://..." {...register("sitio_web")} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="r_logo_url" className="flex items-center gap-1">
+                      <ImageIcon className="h-3 w-3" />
+                      URL del logo
+                    </Label>
+                    <Input id="r_logo_url" placeholder="https://..." {...register("logo_url")} />
+                    {errors.logo_url && <p className="text-xs text-destructive">{errors.logo_url.message}</p>}
+                  </div>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="r_mensaje_pie">Mensaje al pie del comprobante</Label>
+                    <Textarea
+                      id="r_mensaje_pie"
+                      rows={2}
+                      placeholder="¡Gracias por su compra!"
+                      {...register("mensaje_pie")}
+                    />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <Button type="submit" disabled={mut.isPending} className="gap-2 min-w-44">
+          <Save className="h-4 w-4" />
+          {mut.isPending ? "Guardando…" : "Guardar comprobantes"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function SwitchRow({
+  control,
+  name,
+  label,
+  description,
+}: {
+  control: ReturnType<typeof useForm<ReceiptFormValues>>["control"];
+  name: keyof ReceiptFormValues;
+  label: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Controller
+        control={control}
+        name={name as any}
+        render={({ field }) => (
+          <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+        )}
+      />
     </div>
   );
 }

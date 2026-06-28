@@ -11,6 +11,7 @@ import {
   sales,
   saleItems,
   stockMovements,
+  receiptSettings,
 } from "@shared/schema";
 
 function noTenant(res: any) {
@@ -292,11 +293,11 @@ export function registerInventoryRoutes(app: Express): void {
 
     if (client_id && typeof client_id === "string") {
       const [existing] = await db
-        .select({ id: sales.id })
+        .select({ id: sales.id, receiptNumber: sales.receiptNumber })
         .from(sales)
         .where(and(eq(sales.tenantId, tenantId), eq(sales.clientId, client_id)));
       if (existing) {
-        return res.json({ id: existing.id });
+        return res.json({ id: existing.id, receiptNumber: existing.receiptNumber ?? null });
       }
     }
 
@@ -378,8 +379,27 @@ export function registerInventoryRoutes(app: Express): void {
           });
         }
 
-        await tx.update(sales).set({ total: String(total) }).where(eq(sales.id, newSale.id));
-        return { id: newSale.id };
+        let receiptNumber: string | null = null;
+        const [rSettings] = await tx
+          .select()
+          .from(receiptSettings)
+          .where(eq(receiptSettings.tenantId, tenantId))
+          .for("update");
+
+        if (rSettings?.habilitado) {
+          const numero = rSettings.proximoNumero;
+          await tx
+            .update(receiptSettings)
+            .set({ proximoNumero: rSettings.proximoNumero + 1, updatedAt: new Date() })
+            .where(eq(receiptSettings.tenantId, tenantId));
+          receiptNumber = `${rSettings.prefijoNumeracion}-${numero.toString().padStart(6, "0")}`;
+        }
+
+        await tx
+          .update(sales)
+          .set({ total: String(total), receiptNumber })
+          .where(eq(sales.id, newSale.id));
+        return { id: newSale.id, receiptNumber };
       });
 
       broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements"] });

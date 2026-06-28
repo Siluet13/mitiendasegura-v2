@@ -67,6 +67,7 @@ export const sales = pgTable("sales", {
   userId: varchar("user_id").notNull(),
   customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
   clientId: text("client_id"),
+  receiptNumber: text("receipt_number"),
   total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
   observacion: text("observacion"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
