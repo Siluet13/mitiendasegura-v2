@@ -5,6 +5,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { useLicense } from "@/hooks/useLicense";
+import { useBilling } from "@/hooks/useBilling";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useTenantEvents } from "@/hooks/useTenantEvents";
 import { useReconnect } from "@/hooks/useReconnect";
@@ -12,6 +13,7 @@ import { syncAllPending } from "@/lib/offline/sync";
 import { listPending } from "@/lib/offline/queue";
 import { log } from "@/lib/offline/logger";
 import { Button } from "@/components/ui/button";
+import { BillingBanner } from "@/components/BillingBanner";
 import { ShieldX, WifiOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated")({
@@ -44,6 +46,7 @@ function LicenseBlock({ status }: { status: string }) {
 function AuthenticatedLayout() {
   const { user, loading } = useAuth();
   const { license, licenseLoading } = useLicense();
+  const { billing } = useBilling();
   const isOnline = useOnlineStatus();
   const qc = useQueryClient();
   useTenantEvents();
@@ -101,6 +104,7 @@ function AuthenticatedLayout() {
               </span>
             )}
           </header>
+          <BillingBanner billing={billing} />
           <main className="flex-1 p-6">
             <Outlet />
           </main>
