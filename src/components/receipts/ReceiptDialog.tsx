@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Printer, Download, X, Loader2, AlertTriangle } from "lucide-react";
+import { Printer, Download, X, Loader2, AlertTriangle, Info } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { getReceiptSettings } from "@/lib/api/receipts";
+import { getReceiptSettings, type ReceiptSettingsResponse } from "@/lib/api/receipts";
 import { getBusinessSettings } from "@/lib/api/settings";
 import { getSaleWithItems } from "@/lib/api/inventory";
 import { buildReceiptData } from "@/lib/receipt/builder";
@@ -16,15 +16,39 @@ import { generateReceiptPdf } from "@/lib/receipt/pdf";
 import { ReceiptTicket } from "./ReceiptTicket";
 import { ReceiptA4 } from "./ReceiptA4";
 
+const FALLBACK_RECEIPT_CFG: ReceiptSettingsResponse = {
+  id: "",
+  tenant_id: "",
+  habilitado: false,
+  mostrar_dialogo: true,
+  impresion_automatica: false,
+  descarga_automatica: false,
+  tipo_comprobante: "ticket_80mm",
+  prefijo_numeracion: "V",
+  proximo_numero: 1,
+  logo_url: null,
+  nombre_comercial: null,
+  razon_social: null,
+  cuit: null,
+  domicilio: null,
+  telefono: null,
+  email: null,
+  sitio_web: null,
+  mensaje_pie: null,
+  created_at: "",
+  updated_at: "",
+};
+
 interface Props {
   saleId: string | null;
   receiptNumber: string | null;
   customerName: string | null;
   onClose: () => void;
+  skipAutoActions?: boolean;
 }
 
-export function ReceiptDialog({ saleId, receiptNumber, customerName, onClose }: Props) {
-  const open = !!saleId && !!receiptNumber;
+export function ReceiptDialog({ saleId, receiptNumber, customerName, onClose, skipAutoActions }: Props) {
+  const open = !!saleId;
   const autoActioned = useRef(false);
 
   const { data: receiptCfg, isLoading: loadingCfg } = useQuery({
@@ -50,13 +74,15 @@ export function ReceiptDialog({ saleId, receiptNumber, customerName, onClose }: 
 
   const isLoading = loadingCfg || loadingSale;
 
+  const effectiveCfg = receiptCfg ?? FALLBACK_RECEIPT_CFG;
+
   const receiptData =
-    open && sale && receiptCfg && receiptNumber
-      ? buildReceiptData(sale, receiptNumber, receiptCfg, bizSettings ?? null, customerName)
+    open && sale
+      ? buildReceiptData(sale, receiptNumber ?? "", effectiveCfg, bizSettings ?? null, customerName)
       : null;
 
   useEffect(() => {
-    if (!receiptData || !receiptCfg || autoActioned.current) return;
+    if (!receiptData || !receiptCfg || autoActioned.current || skipAutoActions) return;
     autoActioned.current = true;
 
     if (receiptCfg.impresion_automatica) {
@@ -67,7 +93,7 @@ export function ReceiptDialog({ saleId, receiptNumber, customerName, onClose }: 
         toast.error("No se pudo generar el PDF automáticamente");
       });
     }
-  }, [receiptData, receiptCfg]);
+  }, [receiptData, receiptCfg, skipAutoActions]);
 
   useEffect(() => {
     if (!open) { autoActioned.current = false; }
@@ -77,7 +103,7 @@ export function ReceiptDialog({ saleId, receiptNumber, customerName, onClose }: 
     if (!receiptData) return;
     try {
       printReceipt(receiptData);
-    } catch (e) {
+    } catch {
       toast.error("Error al imprimir. Verificá que los pop-ups estén permitidos.");
     }
   }
@@ -86,12 +112,13 @@ export function ReceiptDialog({ saleId, receiptNumber, customerName, onClose }: 
     if (!receiptData) return;
     try {
       await generateReceiptPdf(receiptData);
-    } catch (e) {
+    } catch {
       toast.error("Error al generar el PDF");
     }
   }
 
-  const isA4 = receiptCfg?.tipo_comprobante === "a4";
+  const isA4 = effectiveCfg.tipo_comprobante === "a4";
+  const noReceiptNumber = open && !receiptNumber;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -106,6 +133,16 @@ export function ReceiptDialog({ saleId, receiptNumber, customerName, onClose }: 
             )}
           </DialogTitle>
         </DialogHeader>
+
+        {noReceiptNumber && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <Info className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+              Esta venta no tiene número de comprobante asignado (la emisión estaba deshabilitada
+              cuando se realizó). Podés imprimirla igualmente.
+            </p>
+          </div>
+        )}
 
         <ScrollArea className="max-h-[65vh]">
           <div className="flex justify-center py-2">

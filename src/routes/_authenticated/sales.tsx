@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Trash2, Eye, User, WifiOff } from "lucide-react";
+import { Plus, Trash2, Eye, User, WifiOff, Printer } from "lucide-react";
 import {
   createSale,
   getSaleWithItems,
@@ -78,6 +78,7 @@ function SalesPage() {
     saleId: string;
     receiptNumber: string | null;
     customerId: string | null;
+    skipAutoActions: boolean;
   } | null>(null);
 
   const { data: sales = [], isLoading } = useQuery({ queryKey: ["sales"], queryFn: listSales });
@@ -125,7 +126,7 @@ function SalesPage() {
               <TableHead>Cliente</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead>Observación</TableHead>
-              <TableHead className="w-12" />
+              <TableHead className="w-24" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -166,9 +167,26 @@ function SalesPage() {
                       {s.observacion ?? "—"}
                     </TableCell>
                     <TableCell>
-                      <Button size="icon" variant="ghost" onClick={() => setDetailId(s.id)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Reimprimir comprobante"
+                          onClick={() =>
+                            setPendingReceipt({
+                              saleId: s.id,
+                              receiptNumber: s.receiptNumber,
+                              customerId: s.customerId,
+                              skipAutoActions: true,
+                            })
+                          }
+                        >
+                          <Printer className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => setDetailId(s.id)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -189,7 +207,7 @@ function SalesPage() {
           qc.invalidateQueries({ queryKey: ["stock_movements"] });
         }}
         onSaleCompleted={(saleId, receiptNumber, cid) => {
-          setPendingReceipt({ saleId, receiptNumber, customerId: cid });
+          setPendingReceipt({ saleId, receiptNumber, customerId: cid, skipAutoActions: false });
         }}
       />
 
@@ -203,6 +221,7 @@ function SalesPage() {
             ? (customerMap.get(pendingReceipt.customerId) ?? null)
             : null
         }
+        skipAutoActions={pendingReceipt?.skipAutoActions ?? false}
         onClose={() => setPendingReceipt(null)}
       />
     </div>
