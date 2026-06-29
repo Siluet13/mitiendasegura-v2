@@ -15,23 +15,16 @@ function toDate(value: unknown): Date | null {
   return null;
 }
 
-function pick(obj: Record<string, unknown>, ...keys: string[]): unknown {
-  for (const k of keys) {
-    if (obj[k] !== undefined) return obj[k];
-  }
-  return undefined;
-}
-
 export function normalizeBusinessSettings(raw: unknown): NormalizedBusinessSettings {
   const r = (raw != null && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
   const subscriptionStatus =
-    (pick(r, "subscriptionStatus", "subscription_status") as string | null | undefined) ??
-    "active";
+    (r.subscriptionStatus as string | null | undefined) ?? "active";
 
-  const billingCycleStart = toDate(pick(r, "billingCycleStart", "billing_cycle_start"));
-  const billingCycleEnd = toDate(pick(r, "billingCycleEnd", "billing_cycle_end"));
-  const lastPaymentDate = toDate(pick(r, "lastPaymentDate", "last_payment_date"));
-
-  return { subscriptionStatus, billingCycleStart, billingCycleEnd, lastPaymentDate };
+  return {
+    subscriptionStatus,
+    billingCycleStart: toDate(r.billingCycleStart),
+    billingCycleEnd: toDate(r.billingCycleEnd),
+    lastPaymentDate: toDate(r.lastPaymentDate),
+  };
 }

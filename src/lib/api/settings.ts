@@ -18,9 +18,9 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
 export interface BusinessSettings {
   id: string;
-  owner_id: string;
-  nombre_negocio: string;
-  razon_social: string | null;
+  ownerId: string;
+  nombreNegocio: string;
+  razonSocial: string | null;
   telefono: string | null;
   email: string | null;
   direccion: string | null;
@@ -28,16 +28,35 @@ export interface BusinessSettings {
   provincia: string | null;
   pais: string | null;
   moneda: string;
-  simbolo_moneda: string;
+  simboloMoneda: string;
   decimales: number;
-  logo_url: string | null;
-  mensaje_tickets: string | null;
+  logoUrl: string | null;
+  mensajeTickets: string | null;
   observaciones: string | null;
-  created_at: string;
-  updated_at: string;
+  subscriptionStatus: string;
+  billingCycleStart: string;
+  billingCycleEnd: string;
+  lastPaymentDate: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export type BusinessSettingsInput = Omit<BusinessSettings, "id" | "owner_id" | "created_at" | "updated_at">;
+export interface BusinessSettingsInput {
+  nombre_negocio: string;
+  razon_social?: string | null;
+  telefono?: string | null;
+  email?: string | null;
+  direccion?: string | null;
+  ciudad?: string | null;
+  provincia?: string | null;
+  pais?: string | null;
+  moneda: string;
+  simbolo_moneda: string;
+  decimales: number;
+  logo_url?: string | null;
+  mensaje_tickets?: string | null;
+  observaciones?: string | null;
+}
 
 export async function getBusinessSettings(): Promise<BusinessSettings | null> {
   return apiFetch("/api/settings");

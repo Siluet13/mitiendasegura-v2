@@ -90,10 +90,10 @@ function SettingsPage() {
 
   useEffect(() => {
     if (!data) return;
-    knownUpdatedAtRef.current = data.updated_at ?? null;
+    knownUpdatedAtRef.current = data.updatedAt ?? null;
     reset({
-      nombre_negocio:  data.nombre_negocio ?? "",
-      razon_social:    data.razon_social ?? "",
+      nombre_negocio:  data.nombreNegocio ?? "",
+      razon_social:    data.razonSocial ?? "",
       telefono:        data.telefono ?? "",
       email:           data.email ?? "",
       direccion:       data.direccion ?? "",
@@ -101,10 +101,10 @@ function SettingsPage() {
       provincia:       data.provincia ?? "",
       pais:            data.pais ?? "",
       moneda:          data.moneda ?? "ARS",
-      simbolo_moneda:  data.simbolo_moneda ?? "$",
+      simbolo_moneda:  data.simboloMoneda ?? "$",
       decimales:       data.decimales ?? 2,
-      logo_url:        data.logo_url ?? "",
-      mensaje_tickets: data.mensaje_tickets ?? "",
+      logo_url:        data.logoUrl ?? "",
+      mensaje_tickets: data.mensajeTickets ?? "",
       observaciones:   data.observaciones ?? "",
     });
   }, [data, reset]);

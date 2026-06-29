@@ -5,6 +5,7 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { broadcast } from "../lib/events";
 import { businessSettings } from "@shared/schema";
+import { normalizeBusinessSettingsResponse } from "../lib/normalizers/businessSettings";
 
 export function registerSettingsRoutes(app: Express): void {
   app.get("/api/settings", isAuthenticated, async (req, res) => {
@@ -13,7 +14,7 @@ export function registerSettingsRoutes(app: Express): void {
       .select()
       .from(businessSettings)
       .where(eq(businessSettings.ownerId, userId));
-    res.json(row ?? null);
+    res.json(row ? normalizeBusinessSettingsResponse(row) : null);
   });
 
   app.put("/api/settings", isAuthenticated, async (req, res) => {
@@ -79,29 +80,6 @@ export function registerSettingsRoutes(app: Express): void {
       broadcast(tenantId, { type: "invalidate", entities: ["business_settings"] });
     }
 
-    res.json(toResponse(row));
+    res.json(normalizeBusinessSettingsResponse(row));
   });
-}
-
-function toResponse(s: typeof businessSettings.$inferSelect) {
-  return {
-    id: s.id,
-    owner_id: s.ownerId,
-    nombre_negocio: s.nombreNegocio,
-    razon_social: s.razonSocial,
-    telefono: s.telefono,
-    email: s.email,
-    direccion: s.direccion,
-    ciudad: s.ciudad,
-    provincia: s.provincia,
-    pais: s.pais,
-    moneda: s.moneda,
-    simbolo_moneda: s.simboloMoneda,
-    decimales: s.decimales,
-    logo_url: s.logoUrl,
-    mensaje_tickets: s.mensajeTickets,
-    observaciones: s.observaciones,
-    created_at: s.createdAt,
-    updated_at: s.updatedAt,
-  };
 }
