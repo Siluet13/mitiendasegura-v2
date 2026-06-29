@@ -18,6 +18,7 @@ import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminOfflineDebugRouteImport } from './routes/admin/offline-debug'
+import { Route as AdminDevRouteImport } from './routes/admin/dev'
 import { Route as AuthenticatedStockMovementsRouteImport } from './routes/_authenticated/stock-movements'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedSalesRouteImport } from './routes/_authenticated/sales'
@@ -70,6 +71,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
 const AdminOfflineDebugRoute = AdminOfflineDebugRouteImport.update({
   id: '/offline-debug',
   path: '/offline-debug',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDevRoute = AdminDevRouteImport.update({
+  id: '/dev',
+  path: '/dev',
   getParentRoute: () => AdminRoute,
 } as any)
 const AuthenticatedStockMovementsRoute =
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/sales': typeof AuthenticatedSalesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/stock-movements': typeof AuthenticatedStockMovementsRoute
+  '/admin/dev': typeof AdminDevRoute
   '/admin/offline-debug': typeof AdminOfflineDebugRoute
   '/admin/': typeof AdminIndexRoute
 }
@@ -153,6 +160,7 @@ export interface FileRoutesByTo {
   '/sales': typeof AuthenticatedSalesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/stock-movements': typeof AuthenticatedStockMovementsRoute
+  '/admin/dev': typeof AdminDevRoute
   '/admin/offline-debug': typeof AdminOfflineDebugRoute
   '/admin': typeof AdminIndexRoute
 }
@@ -174,6 +182,7 @@ export interface FileRoutesById {
   '/_authenticated/sales': typeof AuthenticatedSalesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/stock-movements': typeof AuthenticatedStockMovementsRoute
+  '/admin/dev': typeof AdminDevRoute
   '/admin/offline-debug': typeof AdminOfflineDebugRoute
   '/admin/': typeof AdminIndexRoute
 }
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/stock-movements'
+    | '/admin/dev'
     | '/admin/offline-debug'
     | '/admin/'
   fileRoutesByTo: FileRoutesByTo
@@ -213,6 +223,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/stock-movements'
+    | '/admin/dev'
     | '/admin/offline-debug'
     | '/admin'
   id:
@@ -233,6 +244,7 @@ export interface FileRouteTypes {
     | '/_authenticated/sales'
     | '/_authenticated/settings'
     | '/_authenticated/stock-movements'
+    | '/admin/dev'
     | '/admin/offline-debug'
     | '/admin/'
   fileRoutesById: FileRoutesById
@@ -310,6 +322,13 @@ declare module '@tanstack/react-router' {
       path: '/offline-debug'
       fullPath: '/admin/offline-debug'
       preLoaderRoute: typeof AdminOfflineDebugRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/dev': {
+      id: '/admin/dev'
+      path: '/dev'
+      fullPath: '/admin/dev'
+      preLoaderRoute: typeof AdminDevRouteImport
       parentRoute: typeof AdminRoute
     }
     '/_authenticated/stock-movements': {
@@ -407,11 +426,13 @@ const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
 )
 
 interface AdminRouteChildren {
+  AdminDevRoute: typeof AdminDevRoute
   AdminOfflineDebugRoute: typeof AdminOfflineDebugRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminDevRoute: AdminDevRoute,
   AdminOfflineDebugRoute: AdminOfflineDebugRoute,
   AdminIndexRoute: AdminIndexRoute,
 }

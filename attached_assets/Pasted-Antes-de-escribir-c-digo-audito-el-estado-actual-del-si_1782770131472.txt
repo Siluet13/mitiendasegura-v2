@@ -1,0 +1,103 @@
+Antes de escribir código, audito el estado actual del sistema de logs, errores y diagnóstico para no romper nada existente.
+
+Quiero implementar un Panel Dev interno minimalista (MVP) con el siguiente alcance estricto:
+
+OBJETIVO
+Crear un panel accesible SOLO para el owner/admin del sistema que permita ver estado interno de la app para diagnóstico rápido, sin afectar performance ni lógica de negocio.
+
+RESTRICCIONES IMPORTANTES
+
+No usar WebSockets nuevos
+No crear sistema de logs complejo
+No modificar backend crítico de negocio
+No tocar billing, POS ni sync
+No introducir dependencias nuevas
+Solo reutilizar infraestructura existente (SSE si ya existe, React Query, backend logs actuales si existen)
+
+FUNCIONALIDAD MVP
+
+Pantalla Panel Dev
+Crear ruta:
+/admin/dev
+
+Acceso restringido a:
+
+owner del sistema (mismo criterio que Panel Maestro)
+o flag ADMIN_MODE existente si ya está implementado
+Sección: Estado del sistema (read-only)
+Mostrar:
+tenantId actual
+userId actual
+rol actual
+estado de conexión (online/offline)
+estado SSE (conectado/desconectado si existe useTenantEvents)
+timestamp actual del sistema
+Sección: Datos básicos del tenant
+Mostrar conteos (solo lectura):
+productos
+categorías
+clientes
+ventas
+movimientos de stock
+
+Usar endpoints ya existentes o queries de React Query (NO crear nuevos endpoints si no son necesarios)
+
+Sección: Logs básicos (frontend only)
+
+Implementar logger simple en memoria:
+
+capturar console.error
+capturar window.onerror
+guardar últimos 50 eventos
+
+Mostrar en UI:
+
+timestamp
+mensaje
+stack si existe
+Botón: Exportar diagnóstico
+
+Descargar JSON con:
+{
+system: {
+tenantId,
+userId,
+onlineStatus,
+sseStatus,
+timestamp
+},
+counts: {
+products,
+categories,
+customers,
+sales,
+stockMovements
+},
+logs: [...]
+}
+
+DISEÑO
+
+UI simple tipo settings page
+sin estilos complejos
+sin charts
+solo listas + cards básicas
+modo oscuro compatible si ya existe
+
+SEGURIDAD
+
+nunca exponer esta ruta a usuarios normales
+validación server-side si es posible (no solo frontend)
+fallback: si no es admin → redirect / forbidden
+
+OBJETIVO FINAL
+Un panel liviano que permita:
+
+detectar errores de sync
+ver estado del sistema en producción
+debug rápido sin devtools
+exportar diagnóstico para soporte
+
+IMPORTANTE
+Si alguna parte requiere mucho trabajo o riesgo de romper el sistema:
+reducir alcance automáticamente manteniendo solo estado + logs + export.
