@@ -120,6 +120,10 @@ export const businessSettings = pgTable("business_settings", {
   logoUrl: text("logo_url"),
   mensajeTickets: text("mensaje_tickets"),
   observaciones: text("observaciones"),
+  subscriptionStatus: text("subscription_status").notNull().default("active"),
+  billingCycleStart: timestamp("billing_cycle_start").notNull().defaultNow(),
+  billingCycleEnd: timestamp("billing_cycle_end").notNull().default(sql`now() + INTERVAL '30 days'`),
+  lastPaymentDate: timestamp("last_payment_date"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
