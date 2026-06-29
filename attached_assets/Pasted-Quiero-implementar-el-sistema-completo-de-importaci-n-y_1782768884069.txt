@@ -1,0 +1,177 @@
+Quiero implementar el sistema completo de importación y exportación de backups de Mi Tienda Segura en una sola etapa.
+
+IMPORTANTE:
+
+- Antes de escribir código, auditá completamente el sistema actual de backup.
+- Reutilizá toda la lógica existente.
+- No dupliques código.
+- No rompas la compatibilidad con los backups JSON actuales.
+- El sistema debe seguir siendo completamente multi-tenant.
+
+OBJETIVOS
+
+1. Mantener el sistema actual de backup JSON totalmente compatible.
+
+2. Agregar exportación a Excel (.xlsx):
+   - Un archivo Excel.
+   - Una hoja por entidad.
+   - Hojas:
+     - Productos
+     - Categorías
+     - Clientes
+     - Ventas
+     - Detalle de ventas
+     - Movimientos de stock
+   - Encabezados claros y legibles.
+
+3. Agregar exportación CSV:
+   - Un ZIP con un CSV por entidad.
+   - Compatible con Excel, LibreOffice y Google Sheets.
+
+4. Agregar importación desde:
+   - JSON
+   - Excel (.xlsx)
+   - CSV
+
+5. El importador debe ser inteligente.
+
+Debe detectar columnas aunque:
+
+- cambie el orden
+- cambien mayúsculas/minúsculas
+- tengan espacios
+- tengan nombres equivalentes
+
+Ejemplos:
+
+Nombre
+Producto
+Artículo
+
+→ nombre
+
+Descripción
+
+→ descripcion
+
+Código
+SKU
+
+→ sku
+
+Código barras
+Código de barras
+EAN
+
+→ codigoBarras
+
+Precio
+Precio Venta
+Precio público
+
+→ precio
+
+Costo
+Precio compra
+
+→ costo
+
+Stock
+Stock actual
+Existencia
+
+→ stock
+
+Stock mínimo
+
+→ stockMinimo
+
+Categoría
+Rubro
+
+→ categoria
+
+Cliente
+
+→ cliente
+
+Debe ignorar automáticamente columnas desconocidas.
+
+6. Antes de importar debe mostrar una vista previa indicando:
+
+- cantidad de registros encontrados
+- columnas detectadas
+- columnas ignoradas
+- errores encontrados
+
+7. Si existen columnas importantes que no pudieron identificarse automáticamente:
+
+permitir mapearlas manualmente mediante un selector.
+
+Ejemplo:
+
+"Precio Público"
+
+▼ Guardar como
+
+Precio
+Costo
+Stock
+Ignorar
+
+8. Validar todos los registros antes de importar.
+
+Informar:
+
+- registros válidos
+- duplicados
+- errores
+- motivo del error
+
+Ejemplos:
+
+Fila 24:
+SKU duplicado.
+
+Fila 51:
+Precio inválido.
+
+Fila 90:
+Categoría inexistente.
+
+9. La importación debe ser transaccional por entidad.
+
+Si falla un producto:
+
+no debe romper el resto de las entidades.
+
+10. Al finalizar mostrar un resumen.
+
+Ejemplo:
+
+Productos:
+✔ 4820 importados
+⚠ 12 omitidos
+
+Clientes:
+✔ 158 importados
+
+Categorías:
+✔ 18 importadas
+
+11. Agregar un botón:
+
+"Descargar plantilla Excel"
+
+con todas las columnas correctas para facilitar migraciones desde otros sistemas.
+
+12. Toda la lógica debe quedar reutilizable para futuras entidades (por ejemplo Proveedores), evitando código duplicado.
+
+13. Mantener compatibilidad con el sistema actual de sincronización, restauración, permisos y aislamiento multi-tenant.
+
+14. Al finalizar:
+
+- ejecutar TypeScript
+- verificar que compile sin errores nuevos
+- verificar que la aplicación inicie correctamente
+- entregar un informe detallado indicando exactamente qué archivos modificó, qué funcionalidades agregó y cómo probar cada una.

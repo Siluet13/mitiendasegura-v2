@@ -13,6 +13,15 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export interface BackupStats {
   categories: number;
   products: number;
@@ -47,13 +56,63 @@ export async function exportBackup(): Promise<{ size: number; filename: string }
   const blob = await res.blob();
   const date = new Date().toISOString().slice(0, 10);
   const filename = `backup_${date}.json`;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  triggerDownload(blob, filename);
   return { size: blob.size, filename };
+}
+
+export async function exportXlsx(): Promise<{ filename: string }> {
+  const res = await fetch("/api/backup/export/xlsx", { credentials: "include" });
+  if (!res.ok) throw new Error("Error al exportar el backup Excel");
+  const blob = await res.blob();
+  const date = new Date().toISOString().slice(0, 10);
+  const filename = `backup_${date}.xlsx`;
+  triggerDownload(blob, filename);
+  return { filename };
+}
+
+export async function exportCsv(): Promise<{ filename: string }> {
+  const res = await fetch("/api/backup/export/csv", { credentials: "include" });
+  if (!res.ok) throw new Error("Error al exportar el backup CSV");
+  const blob = await res.blob();
+  const date = new Date().toISOString().slice(0, 10);
+  const filename = `backup_csv_${date}.zip`;
+  triggerDownload(blob, filename);
+  return { filename };
+}
+
+export async function downloadTemplate(): Promise<void> {
+  const res = await fetch("/api/backup/template", { credentials: "include" });
+  if (!res.ok) throw new Error("Error al descargar la plantilla");
+  const blob = await res.blob();
+  triggerDownload(blob, "plantilla_importacion.xlsx");
+}
+
+export interface ImportEntityPayload {
+  nombre: string;
+  [key: string]: unknown;
+}
+
+export interface EntityImportResult {
+  imported: number;
+  skipped: number;
+  errors: { row: number; reason: string }[];
+}
+
+export interface ImportResult {
+  categories?: EntityImportResult;
+  products?: EntityImportResult;
+  customers?: EntityImportResult;
+}
+
+export async function importData(payload: {
+  categories?: unknown[];
+  products?: unknown[];
+  customers?: unknown[];
+}): Promise<{ results: ImportResult }> {
+  return apiFetch("/api/backup/import", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function restoreBackup(payload: BackupPayload): Promise<{ ok: boolean; stats: BackupStats }> {
@@ -66,11 +125,7 @@ export async function restoreBackup(payload: BackupPayload): Promise<{ ok: boole
 export function parseBackupFile(file: File): Promise<BackupPayload> {
   return new Promise((resolve, reject) => {
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      reject(
-        new Error(
-          `El archivo supera el límite de 50 MB (${(file.size / 1024 / 1024).toFixed(1)} MB)`
-        )
-      );
+      reject(new Error(`El archivo supera el límite de 50 MB (${(file.size / 1024 / 1024).toFixed(1)} MB)`));
       return;
     }
 
@@ -108,12 +163,8 @@ export function parseBackupFile(file: File): Promise<BackupPayload> {
         }
 
         const totalItems =
-          d.categories.length +
-          d.products.length +
-          d.customers.length +
-          d.sales.length +
-          d.saleItems.length +
-          d.stockMovements.length;
+          d.categories.length + d.products.length + d.customers.length +
+          d.sales.length + d.saleItems.length + d.stockMovements.length;
         if (totalItems === 0 && !d.businessSettings) {
           reject(new Error("El backup está vacío y no contiene datos para restaurar"));
           return;

@@ -15,7 +15,7 @@ import { checkLicense } from "./middleware/license";
 import { resolveTenant } from "./middleware/tenant";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "20mb" }));
 
 const clientDir = join(process.cwd(), "dist/client");
 const ssrBundle = join(process.cwd(), "dist/server/server.js");

@@ -4,10 +4,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { exportBackup, restoreBackup, parseBackupFile } from "@/lib/api/backup";
+import { Separator } from "@/components/ui/separator";
+import {
+  exportBackup, exportXlsx, exportCsv, downloadTemplate,
+  restoreBackup, parseBackupFile,
+} from "@/lib/api/backup";
 import type { BackupPayload } from "@/lib/api/backup";
+import { ImportWizard } from "@/components/backup/ImportWizard";
 import { toast } from "sonner";
-import { AlertCircle, AlertTriangle, Clock, Download, RotateCcw, Upload } from "lucide-react";
+import {
+  AlertCircle, AlertTriangle, Clock, Download, FileSpreadsheet,
+  FileArchive, FileJson, RotateCcw, Upload, TableProperties,
+} from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/backup")({
@@ -24,11 +32,7 @@ interface BackupHistoryEntry {
 }
 
 function getLocalHistory(): BackupHistoryEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]"); } catch { return []; }
 }
 
 function saveToLocalHistory(entry: BackupHistoryEntry): BackupHistoryEntry[] {
@@ -46,7 +50,7 @@ function formatBytes(bytes: number): string {
 function BackupPage() {
   const { user } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [pending, setPending] = useState<BackupPayload | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -54,17 +58,38 @@ function BackupPage() {
   const [restoreResult, setRestoreResult] = useState<{ ok: boolean; label: string } | null>(null);
   const [history, setHistory] = useState<BackupHistoryEntry[]>(() => getLocalHistory());
 
-  async function handleExport() {
-    setExporting(true);
+  async function handleExport(format: "json" | "xlsx" | "csv") {
+    setExporting(format);
     try {
-      const { size, filename } = await exportBackup();
-      const updated = saveToLocalHistory({ date: new Date().toISOString(), filename, size });
-      setHistory(updated);
-      toast.success("Backup descargado correctamente");
+      if (format === "json") {
+        const { size, filename } = await exportBackup();
+        const updated = saveToLocalHistory({ date: new Date().toISOString(), filename, size });
+        setHistory(updated);
+        toast.success("Backup JSON descargado");
+      } else if (format === "xlsx") {
+        const { filename } = await exportXlsx();
+        const updated = saveToLocalHistory({ date: new Date().toISOString(), filename, size: 0 });
+        setHistory(updated);
+        toast.success("Backup Excel descargado");
+      } else {
+        const { filename } = await exportCsv();
+        const updated = saveToLocalHistory({ date: new Date().toISOString(), filename, size: 0 });
+        setHistory(updated);
+        toast.success("Backup CSV (ZIP) descargado");
+      }
     } catch (e: any) {
       toast.error(e.message ?? "Error al exportar");
     } finally {
-      setExporting(false);
+      setExporting(null);
+    }
+  }
+
+  async function handleTemplate() {
+    try {
+      await downloadTemplate();
+      toast.success("Plantilla descargada");
+    } catch (e: any) {
+      toast.error(e.message ?? "Error al descargar la plantilla");
     }
   }
 
@@ -113,34 +138,95 @@ function BackupPage() {
       <div>
         <h1 className="text-2xl font-bold">Backup y Restauración</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Exportá todos tus datos a un archivo JSON o restaurá desde un backup anterior.
+          Exportá e importá tus datos en múltiples formatos.
         </p>
       </div>
 
+      {/* EXPORTACIÓN */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Download className="h-4 w-4" /> Exportar datos
           </CardTitle>
           <CardDescription>
-            Descargá un archivo JSON con todos tus productos, categorías, clientes, ventas,
-            movimientos de stock y configuración del negocio.
+            Descargá todos tus datos en el formato que prefieras.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Button onClick={handleExport} disabled={exporting}>
-            {exporting ? "Exportando..." : "Descargar backup"}
-          </Button>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <Button
+              variant="outline"
+              onClick={() => handleExport("json")}
+              disabled={exporting !== null}
+              className="justify-start gap-2"
+            >
+              <FileJson className="h-4 w-4 text-blue-500" />
+              {exporting === "json" ? "Exportando..." : "JSON (backup completo)"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleExport("xlsx")}
+              disabled={exporting !== null}
+              className="justify-start gap-2"
+            >
+              <FileSpreadsheet className="h-4 w-4 text-green-600" />
+              {exporting === "xlsx" ? "Exportando..." : "Excel (.xlsx)"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleExport("csv")}
+              disabled={exporting !== null}
+              className="justify-start gap-2"
+            >
+              <FileArchive className="h-4 w-4 text-yellow-600" />
+              {exporting === "csv" ? "Exportando..." : "CSV (.zip)"}
+            </Button>
+          </div>
+          <div className="text-xs text-muted-foreground space-y-0.5 pt-1">
+            <p><strong>JSON</strong> — backup completo con todas las entidades, ideal para restaurar.</p>
+            <p><strong>Excel</strong> — una hoja por entidad, compatible con Excel y Google Sheets.</p>
+            <p><strong>CSV ZIP</strong> — un CSV por entidad, compatible con cualquier sistema.</p>
+          </div>
         </CardContent>
       </Card>
 
+      {/* IMPORTACIÓN */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Upload className="h-4 w-4" /> Restaurar backup
+            <Upload className="h-4 w-4" /> Importar datos
           </CardTitle>
           <CardDescription>
-            Seleccioná un archivo de backup (.json) para restaurar tus datos.
+            Importá productos, categorías o clientes desde JSON, Excel o CSV.
+            Los datos se agregan sin reemplazar los existentes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleTemplate}
+              className="gap-2"
+            >
+              <TableProperties className="h-4 w-4" />
+              Descargar plantilla Excel
+            </Button>
+            <span className="text-xs text-muted-foreground">para migrar desde otros sistemas</span>
+          </div>
+          <Separator />
+          <ImportWizard />
+        </CardContent>
+      </Card>
+
+      {/* RESTAURACIÓN COMPLETA */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <RotateCcw className="h-4 w-4" /> Restaurar backup completo
+          </CardTitle>
+          <CardDescription>
+            Restaurá desde un backup JSON. Reemplaza <strong>todos</strong> los datos actuales.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -148,8 +234,7 @@ function BackupPage() {
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
               <strong>Atención:</strong> La restauración reemplaza{" "}
-              <strong>todos los datos actuales</strong> por los del backup. Esta acción no se puede
-              deshacer.
+              <strong>todos los datos actuales</strong> por los del backup. Esta acción no se puede deshacer.
             </AlertDescription>
           </Alert>
 
@@ -169,7 +254,6 @@ function BackupPage() {
           {pending && (
             <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
               <div className="text-sm font-medium">Vista previa del backup:</div>
-
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <span className="text-muted-foreground">Exportado el:</span>
                 <span>{new Date(pending.exportedAt).toLocaleString("es-AR")}</span>
@@ -242,33 +326,27 @@ function BackupPage() {
         </CardContent>
       </Card>
 
+      {/* HISTORIAL */}
       {history.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Clock className="h-4 w-4" /> Historial de exportaciones
             </CardTitle>
-            <CardDescription>
-              Últimos backups descargados en este dispositivo.
-            </CardDescription>
+            <CardDescription>Últimos backups descargados en este dispositivo.</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="divide-y text-sm">
               {history.map((entry, i) => (
                 <li key={i} className="flex items-center justify-between py-2 gap-4">
-                  <span className="font-mono text-xs text-muted-foreground truncate">
-                    {entry.filename}
-                  </span>
-                  <span className="text-muted-foreground whitespace-nowrap">
-                    {formatBytes(entry.size)}
-                  </span>
+                  <span className="font-mono text-xs text-muted-foreground truncate">{entry.filename}</span>
+                  {entry.size > 0 && (
+                    <span className="text-muted-foreground whitespace-nowrap">{formatBytes(entry.size)}</span>
+                  )}
                   <span className="text-muted-foreground whitespace-nowrap">
                     {new Date(entry.date).toLocaleString("es-AR", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
+                      day: "2-digit", month: "2-digit", year: "2-digit",
+                      hour: "2-digit", minute: "2-digit",
                     })}
                   </span>
                 </li>
