@@ -1,0 +1,115 @@
+Quiero corregir únicamente los siguientes bugs. No agregues funcionalidades nuevas ni hagas refactors de arquitectura. El objetivo es dejar estos tres puntos completamente resueltos y verificados.
+
+IMPORTANTE:
+
+- Antes de modificar código, auditá los archivos involucrados.
+- Buscá la causa raíz de cada bug.
+- Si encontrás más de una causa, corregí todas.
+- Al finalizar ejecutá TypeScript, verificá que la app inicie correctamente y comprobá que no rompiste ninguna funcionalidad existente.
+
+=========================
+BUG 1 — NO SE PUEDEN ELIMINAR PRODUCTOS
+=========================
+
+Analizá todo el flujo de eliminación:
+
+- botón del frontend
+- llamada API
+- endpoint DELETE
+- storage
+- invalidaciones React Query
+- sincronización SSE
+- restricciones por ventas
+- restricciones por movimientos de stock
+- manejo de errores
+
+Objetivo:
+
+- Si el producto puede eliminarse, debe eliminarse correctamente.
+- Si no puede eliminarse por integridad de datos, debe mostrarse un mensaje claro indicando el motivo.
+- Nunca debe fallar silenciosamente.
+
+Verificá también que la sincronización entre dispositivos siga funcionando después del DELETE.
+
+=========================
+BUG 2 — RESTAURAR BACKUP
+=========================
+
+Actualmente ocurre este error:
+
+value.toISOString is not a function
+
+El backup fue generado por la misma aplicación.
+
+Analizá todo el flujo de restauración.
+
+Buscá cualquier lugar donde se asuma incorrectamente que una fecha ya es un objeto Date.
+
+La restauración debe aceptar correctamente:
+
+- Date
+- string ISO
+- null
+
+sin lanzar errores.
+
+También verificá que:
+
+- businessSettings = null no rompa la restauración
+- receiptSettings = null no rompa la restauración
+- license = null no rompa la restauración
+
+Después de corregirlo, verificá restaurando un backup generado por la propia aplicación.
+
+=========================
+BUG 3 — SINCRONIZACIÓN DE COMPROBANTES
+=========================
+
+Toda la sincronización funciona excepto:
+
+Configuración
+→ Comprobantes
+
+Auditá completamente:
+
+- receipt settings
+- endpoints
+- React Query
+- query keys
+- broadcasts SSE
+- invalidateQueries
+- listeners
+
+Objetivo:
+
+Modificar la configuración de comprobantes en un dispositivo y verificar que el otro dispositivo conectado la reciba automáticamente sin recargar.
+
+=========================
+RESTRICCIONES
+=========================
+
+NO cambiar arquitectura.
+
+NO cambiar modelo de datos salvo que sea imprescindible para corregir un bug.
+
+NO modificar funcionalidades ya terminadas.
+
+NO tocar Billing.
+
+NO tocar PWA.
+
+NO tocar Backup Pro.
+
+NO tocar Panel Dev.
+
+=========================
+ENTREGA
+=========================
+
+Al finalizar quiero un informe indicando:
+
+1. Causa exacta de cada bug.
+2. Archivos modificados.
+3. Qué se corrigió.
+4. Cómo fue verificado.
+5. Confirmación de que TypeScript quedó limpio y la aplicación inicia correctamente.

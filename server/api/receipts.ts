@@ -4,6 +4,7 @@ import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { receiptSettings } from "@shared/schema";
+import { broadcast } from "../lib/events";
 
 export function registerReceiptsRoutes(app: Express): void {
   app.get("/api/receipts/settings", isAuthenticated, async (req, res) => {
@@ -57,6 +58,7 @@ export function registerReceiptsRoutes(app: Express): void {
       })
       .returning();
 
+    broadcast(tenantId, { type: "invalidate", entities: ["receipt_settings"] });
     res.json(toResponse(row));
   });
 }

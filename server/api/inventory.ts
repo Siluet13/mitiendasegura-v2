@@ -186,11 +186,31 @@ export function registerInventoryRoutes(app: Express): void {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
-    await db
-      .delete(products)
-      .where(and(eq(products.id, id), eq(products.tenantId, tenantId)));
-    broadcast(tenantId, { type: "invalidate", entities: ["products"] });
-    res.json({ ok: true });
+    try {
+      await db
+        .delete(products)
+        .where(and(eq(products.id, id), eq(products.tenantId, tenantId)));
+      broadcast(tenantId, { type: "invalidate", entities: ["products"] });
+      res.json({ ok: true });
+    } catch (err: any) {
+      if (err?.code === "23503") {
+        const detail: string = err?.detail ?? err?.message ?? "";
+        if (detail.includes("sale_items")) {
+          return res.status(409).json({
+            message: "No se puede eliminar: el producto tiene ventas registradas. Eliminá las ventas primero o desactivá el producto.",
+          });
+        }
+        if (detail.includes("stock_movements")) {
+          return res.status(409).json({
+            message: "No se puede eliminar: el producto tiene movimientos de stock registrados. Desactivá el producto en su lugar.",
+          });
+        }
+        return res.status(409).json({
+          message: "No se puede eliminar: el producto está referenciado en otros registros.",
+        });
+      }
+      throw err;
+    }
   });
 
   // ── Customers ─────────────────────────────────────────────────────────────

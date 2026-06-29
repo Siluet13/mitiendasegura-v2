@@ -123,6 +123,17 @@ export function registerBackupRoutes(app: Express): void {
       });
     }
 
+    function toDate(v: unknown): Date | null {
+      if (!v) return null;
+      if (v instanceof Date) return v;
+      const d = new Date(v as string);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    function toDateRequired(v: unknown): Date {
+      return toDate(v) ?? new Date();
+    }
+
     try {
       await db.transaction(async (tx) => {
         await tx.delete(stockMovements).where(eq(stockMovements.tenantId, tenantId));
@@ -143,40 +154,84 @@ export function registerBackupRoutes(app: Express): void {
         await tx.delete(businessSettings).where(eq(businessSettings.ownerId, userId));
 
         if (data.businessSettings) {
-          await tx.insert(businessSettings).values({ ...data.businessSettings, ownerId: userId });
+          const bs = data.businessSettings as any;
+          await tx.insert(businessSettings).values({
+            ...bs,
+            ownerId: userId,
+            billingCycleStart: toDateRequired(bs.billingCycleStart),
+            billingCycleEnd: toDateRequired(bs.billingCycleEnd),
+            lastPaymentDate: toDate(bs.lastPaymentDate),
+            createdAt: toDateRequired(bs.createdAt),
+            updatedAt: toDateRequired(bs.updatedAt),
+          });
         }
 
         if (data.categories.length > 0) {
           await tx.insert(categories).values(
-            data.categories.map((c: any) => ({ ...c, ownerId: userId, tenantId }))
+            data.categories.map((c: any) => ({
+              ...c,
+              ownerId: userId,
+              tenantId,
+              createdAt: toDateRequired(c.createdAt),
+              updatedAt: toDateRequired(c.updatedAt),
+            }))
           );
         }
 
         if (data.products.length > 0) {
           await tx.insert(products).values(
-            data.products.map((p: any) => ({ ...p, ownerId: userId, tenantId }))
+            data.products.map((p: any) => ({
+              ...p,
+              ownerId: userId,
+              tenantId,
+              createdAt: toDateRequired(p.createdAt),
+              updatedAt: toDateRequired(p.updatedAt),
+            }))
           );
         }
 
         if (data.customers.length > 0) {
           await tx.insert(customers).values(
-            data.customers.map((c: any) => ({ ...c, ownerId: userId, tenantId }))
+            data.customers.map((c: any) => ({
+              ...c,
+              ownerId: userId,
+              tenantId,
+              createdAt: toDateRequired(c.createdAt),
+              updatedAt: toDateRequired(c.updatedAt),
+            }))
           );
         }
 
         if (data.sales.length > 0) {
           await tx.insert(sales).values(
-            data.sales.map((s: any) => ({ ...s, ownerId: userId, userId, tenantId }))
+            data.sales.map((s: any) => ({
+              ...s,
+              ownerId: userId,
+              userId,
+              tenantId,
+              createdAt: toDateRequired(s.createdAt),
+            }))
           );
         }
 
         if (data.saleItems.length > 0) {
-          await tx.insert(saleItems).values(data.saleItems);
+          await tx.insert(saleItems).values(
+            data.saleItems.map((si: any) => ({
+              ...si,
+              createdAt: toDateRequired(si.createdAt),
+            }))
+          );
         }
 
         if (data.stockMovements.length > 0) {
           await tx.insert(stockMovements).values(
-            data.stockMovements.map((m: any) => ({ ...m, ownerId: userId, userId, tenantId }))
+            data.stockMovements.map((m: any) => ({
+              ...m,
+              ownerId: userId,
+              userId,
+              tenantId,
+              createdAt: toDateRequired(m.createdAt),
+            }))
           );
         }
 
@@ -188,18 +243,18 @@ export function registerBackupRoutes(app: Express): void {
               id: lic.id,
               ownerId: userId,
               status: lic.status ?? "pendiente",
-              activatedAt: lic.activatedAt ? new Date(lic.activatedAt) : null,
-              expiresAt: lic.expiresAt ? new Date(lic.expiresAt) : null,
-              suspendedAt: lic.suspendedAt ? new Date(lic.suspendedAt) : null,
+              activatedAt: toDate(lic.activatedAt),
+              expiresAt: toDate(lic.expiresAt),
+              suspendedAt: toDate(lic.suspendedAt),
               notes: lic.notes ?? null,
             })
             .onConflictDoUpdate({
               target: licenses.ownerId,
               set: {
                 status: lic.status ?? "pendiente",
-                activatedAt: lic.activatedAt ? new Date(lic.activatedAt) : null,
-                expiresAt: lic.expiresAt ? new Date(lic.expiresAt) : null,
-                suspendedAt: lic.suspendedAt ? new Date(lic.suspendedAt) : null,
+                activatedAt: toDate(lic.activatedAt),
+                expiresAt: toDate(lic.expiresAt),
+                suspendedAt: toDate(lic.suspendedAt),
                 notes: lic.notes ?? null,
                 updatedAt: new Date(),
               },
