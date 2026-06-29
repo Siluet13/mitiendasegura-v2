@@ -89,7 +89,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     scripts: [
       {
-        children: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}`,
+        children: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).catch(function(){});}`,
       },
     ],
   }),
@@ -174,6 +174,14 @@ function PwaUpdateBanner() {
         window.location.reload();
       }
     });
+
+    const updateInterval = setInterval(() => {
+      navigator.serviceWorker.getRegistration("/sw.js").then((reg) => {
+        reg?.update();
+      });
+    }, 60 * 60 * 1000);
+
+    return () => clearInterval(updateInterval);
   }, []);
 
   function handleUpdate() {

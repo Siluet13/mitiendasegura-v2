@@ -1,6 +1,6 @@
 - [POS SaaS Architecture](pos-saas-arch.md) — Express API port 5001 + Vite SPA port 5000; auth is Replit OIDC, NOT Supabase (Supabase was fully removed).
 - [Dashboard N+1 Fix](dashboard-n1-fix.md) — recent-sales and top-products had N+1 / full-table JS aggregation; replaced with JOIN+COUNT and SQL GROUP BY in dashboard.ts.
-- [PWA Removed](pwa-removed.md) — vite-plugin-pwa was fully removed (caused stale SW serving offline.html); icons remain in public/icons/ but no SW, no manifest, no offline.html.
+- [PWA Hardening](pwa-hardening.md) — icons replaced with real artwork (magick from 1024×1024 logo); SW uses __SW_VERSION__ placeholder replaced by Vite closeBundle plugin; updateViaCache:'none' + periodic registration.update() every 60min; console.log removed from SW production code.
 - [Panel Maestro & Healthcheck](admin-healthcheck.md) — /admin route exists but had no sidebar link (added); /health endpoint added to server/index.ts for Replit Deploy healthcheck.
 - [SaaS Foundation](saas-foundation.md) — tenants+profiles tables added; tenant_id NOT NULL + indexed on 5 inventory tables; migrations/ baseline created; server/lib/context.ts centralizes user/tenant helpers.
 - [Offline System Audit](offline-audit.md) — 6 bugs found and fixed: RQ cache persistence (localStorage mts_rq_cache_v1), SW skipWaiting on install, sync loop resilience (safeUpdateStatus), idbRequest abort handler, write timeouts 3000ms, gcTime 24h.

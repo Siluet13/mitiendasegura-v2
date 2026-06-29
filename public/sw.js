@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = '__SW_VERSION__';
 const SHELL_CACHE = `mi-tienda-shell-${CACHE_VERSION}`;
 const ASSETS_CACHE = `mi-tienda-assets-${CACHE_VERSION}`;
 
@@ -13,11 +13,6 @@ const STATIC_PRECACHE = [
   '/icons/icon.svg',
 ];
 
-function logAsset(status, pathname) {
-  if (!pathname.startsWith('/assets/')) return;
-  console.log(`[SW ${CACHE_VERSION}] ${status.padEnd(20)} ${pathname}`);
-}
-
 async function listCaches() {
   const keys = await caches.keys();
   const result = [];
@@ -26,8 +21,6 @@ async function listCaches() {
     const requests = await cache.keys();
     const urls = requests.map((r) => new URL(r.url).pathname).sort();
     result.push({ cache: key, count: urls.length, urls });
-    console.log(`\n[SW DIAG] ── ${key} (${urls.length} archivos) ──`);
-    for (const u of urls) console.log(`[SW DIAG]   ${u}`);
   }
   return result;
 }
@@ -59,19 +52,10 @@ self.addEventListener('install', (event) => {
         await Promise.allSettled(
           discovered.map((url) =>
             fetch(url)
-              .then((r) => {
-                if (r.ok) {
-                  logAsset('CACHED SUCCESSFULLY', url);
-                  return cache.put(url, r);
-                }
-                logAsset('FETCH FAILED', url);
-                return null;
-              })
-              .catch(() => { logAsset('FETCH FAILED', url); return null; })
+              .then((r) => (r.ok ? cache.put(url, r) : null))
+              .catch(() => null)
           )
         );
-
-        console.log(`[SW ${CACHE_VERSION}] install: shell + ${STATIC_PRECACHE.length} static + ${discovered.length} asset bundles precached`);
       })
       .catch(() =>
         caches.open(SHELL_CACHE)
@@ -133,24 +117,14 @@ self.addEventListener('fetch', (event) => {
   if (isStaticAsset(url.pathname)) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
-        if (cached) {
-          logAsset('CACHE HIT', url.pathname);
-          return cached;
-        }
-        logAsset('CACHE MISS', url.pathname);
+        if (cached) return cached;
         return fetch(event.request).then((response) => {
           if (response?.ok) {
-            logAsset('CACHED SUCCESSFULLY', url.pathname);
             const clone = response.clone();
             caches.open(ASSETS_CACHE).then((cache) => cache.put(event.request, clone));
-          } else {
-            logAsset('FETCH FAILED', url.pathname);
           }
           return response;
-        }).catch(() => {
-          logAsset('FETCH FAILED', url.pathname);
-          return cached ?? new Response('', { status: 503 });
-        });
+        }).catch(() => cached ?? new Response('', { status: 503 }));
       })
     );
     return;
