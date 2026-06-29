@@ -11,11 +11,13 @@ import {
   deleteCategory,
   listCategories,
   updateCategory,
+  ConflictError,
   type Category,
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { enqueue, isNetworkError } from "@/lib/offline/queue";
 import { log } from "@/lib/offline/logger";
+import { ConflictDialog } from "@/components/ui/conflict-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,6 +57,8 @@ const schema = z.object({
 });
 type FormValues = z.infer<typeof schema>;
 
+type MutInput = { values: FormValues; knownUpdatedAt: string | null };
+
 function CategoriesPage() {
   const qc = useQueryClient();
   const isOnline = useOnlineStatus();
@@ -64,6 +68,9 @@ function CategoriesPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
   const [deleting, setDeleting] = useState<Category | null>(null);
+  const [knownUpdatedAt, setKnownUpdatedAt] = useState<string | null>(null);
+  const [conflictPending, setConflictPending] = useState(false);
+  const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -71,24 +78,27 @@ function CategoriesPage() {
   });
 
   function openNew() {
-    log("FORM_OPEN", { entity: "category", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
-    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(null);
+    setKnownUpdatedAt(null);
+    setConflictPending(false);
+    setPendingValues(null);
     form.reset({ nombre: "" });
     setOpen(true);
   }
+
   function openEdit(c: Category) {
-    log("FORM_OPEN", { entity: "category", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
-    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(c);
+    setKnownUpdatedAt(c.updatedAt ?? null);
+    setConflictPending(false);
+    setPendingValues(null);
     form.reset({ nombre: c.nombre });
     setOpen(true);
   }
 
   const saveMut = useMutation({
-    mutationFn: async (values: FormValues) => {
+    mutationFn: async ({ values, knownUpdatedAt }: MutInput) => {
       if (editing) {
-        return updateCategory(editing.id, values);
+        return updateCategory(editing.id, values, knownUpdatedAt);
       }
       log("CATEGORY_CREATE_START", { nombre: values.nombre });
       if (!isOnline || !navigator.onLine) {
@@ -123,6 +133,31 @@ function CategoriesPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  async function handleSave(values: FormValues, forcedUpdatedAt: string | null) {
+    try {
+      const result = await saveMut.mutateAsync({ values, knownUpdatedAt: forcedUpdatedAt });
+      if (result === null) {
+        toast.success("Categoría guardada localmente. Se sincronizará al reconectar.");
+      } else {
+        qc.invalidateQueries({ queryKey: ["categories"] });
+        qc.invalidateQueries({ queryKey: ["products"] });
+        toast.success(editing ? "Categoría actualizada" : "Categoría creada");
+      }
+      form.reset({ nombre: "" });
+      setOpen(false);
+      setConflictPending(false);
+      setPendingValues(null);
+    } catch (e) {
+      if (e instanceof ConflictError) {
+        setPendingValues(values);
+        setConflictPending(true);
+        return;
+      }
+      log("MUTATION_ERROR", { entity: "category", error: String(e) }, "error");
+      toast.error(e instanceof Error ? e.message : "Error al guardar");
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -179,32 +214,7 @@ function CategoriesPage() {
           <DialogHeader>
             <DialogTitle>{editing ? "Editar categoría" : "Nueva categoría"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit(async (v) => {
-            log("MUTATION_START", { entity: "category", editing: !!editing });
-            try {
-              log("MUTATION_BEFORE_AWAIT", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
-              const result = await saveMut.mutateAsync(v);
-              log("MUTATION_AFTER_AWAIT", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
-              log("MUTATION_SUCCESS", { entity: "category", offline: result === null });
-              if (result === null) {
-                toast.success("Categoría guardada localmente. Se sincronizará al reconectar.");
-              } else {
-                qc.invalidateQueries({ queryKey: ["categories"] });
-                qc.invalidateQueries({ queryKey: ["products"] });
-                toast.success(editing ? "Categoría actualizada" : "Categoría creada");
-              }
-              log("FORM_RESET", { entity: "category" });
-              form.reset({ nombre: "" });
-              log("FORM_CLOSE", { entity: "category", isPending: saveMut.isPending, status: saveMut.status, open });
-              log("DIALOG_CLOSE", { entity: "category" });
-              setOpen(false);
-            } catch (e) {
-              log("MUTATION_ERROR", { entity: "category", error: String(e) }, "error");
-              toast.error(e instanceof Error ? e.message : "Error al guardar");
-            } finally {
-              log("MUTATION_SETTLED", { entity: "category", isPending: saveMut.isPending, status: saveMut.status });
-            }
-          })} className="space-y-4">
+          <form onSubmit={form.handleSubmit((v) => handleSave(v, knownUpdatedAt))} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="nombre">Nombre</Label>
               <Input id="nombre" {...form.register("nombre")} autoFocus />
@@ -238,6 +248,18 @@ function CategoriesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ConflictDialog
+        open={conflictPending && !!editing}
+        onContinue={() => {
+          if (pendingValues) handleSave(pendingValues, null);
+        }}
+        onCancel={() => {
+          setConflictPending(false);
+          setPendingValues(null);
+          setOpen(false);
+        }}
+      />
     </div>
   );
 }

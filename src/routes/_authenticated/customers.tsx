@@ -11,12 +11,14 @@ import {
   deleteCustomer,
   listCustomers,
   updateCustomer,
+  ConflictError,
   type Customer,
   type CustomerInput,
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { enqueue, isNetworkError } from "@/lib/offline/queue";
 import { log } from "@/lib/offline/logger";
+import { ConflictDialog } from "@/components/ui/conflict-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,6 +81,8 @@ const defaults: FormValues = {
   observaciones: "",
 };
 
+type MutInput = { values: FormValues; knownUpdatedAt: string | null };
+
 function CustomersPage() {
   const qc = useQueryClient();
   const isOnline = useOnlineStatus();
@@ -92,6 +96,9 @@ function CustomersPage() {
   const [editing, setEditing] = useState<Customer | null>(null);
   const [deleting, setDeleting] = useState<Customer | null>(null);
   const [search, setSearch] = useState("");
+  const [knownUpdatedAt, setKnownUpdatedAt] = useState<string | null>(null);
+  const [conflictPending, setConflictPending] = useState(false);
+  const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
 
   const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: defaults });
 
@@ -107,17 +114,19 @@ function CustomersPage() {
   }, [customers, search]);
 
   function openNew() {
-    log("FORM_OPEN", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
-    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(null);
+    setKnownUpdatedAt(null);
+    setConflictPending(false);
+    setPendingValues(null);
     form.reset(defaults);
     setOpen(true);
   }
 
   function openEdit(c: Customer) {
-    log("FORM_OPEN", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
-    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(c);
+    setKnownUpdatedAt(c.updatedAt ?? null);
+    setConflictPending(false);
+    setPendingValues(null);
     form.reset({
       nombre: c.nombre,
       telefono: c.telefono ?? "",
@@ -129,7 +138,7 @@ function CustomersPage() {
   }
 
   const saveMut = useMutation({
-    mutationFn: async (values: FormValues) => {
+    mutationFn: async ({ values, knownUpdatedAt }: MutInput) => {
       const payload: CustomerInput = {
         nombre: values.nombre,
         telefono: values.telefono?.trim() ? values.telefono : null,
@@ -138,7 +147,7 @@ function CustomersPage() {
         observaciones: values.observaciones?.trim() ? values.observaciones : null,
       };
       if (editing) {
-        return updateCustomer(editing.id, payload);
+        return updateCustomer(editing.id, payload, knownUpdatedAt);
       }
       log("CUSTOMER_CREATE_START", { nombre: payload.nombre });
       if (!isOnline || !navigator.onLine) {
@@ -172,6 +181,35 @@ function CustomersPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  async function handleSave(values: FormValues, forcedUpdatedAt: string | null) {
+    try {
+      const result = await saveMut.mutateAsync({ values, knownUpdatedAt: forcedUpdatedAt });
+      if (result === null) {
+        toast.success("Cliente guardado localmente. Se sincronizará al reconectar.");
+      } else {
+        qc.invalidateQueries({ queryKey: ["customers"] });
+        toast.success(editing ? "Cliente actualizado" : "Cliente creado");
+      }
+      setOpen(false);
+      setConflictPending(false);
+      setPendingValues(null);
+    } catch (e) {
+      if (e instanceof ConflictError) {
+        setPendingValues(values);
+        setConflictPending(true);
+        return;
+      }
+      log("MUTATION_ERROR", { entity: "customer", error: String(e) }, "error");
+      if (e instanceof Error && e.message.includes("customers_nombre_telefono_owner_unique")) {
+        toast.error("Ya existe un cliente con el mismo nombre y teléfono");
+      } else if (e instanceof Error && e.message.includes("customers_email_check")) {
+        toast.error("El email no es válido");
+      } else {
+        toast.error(e instanceof Error ? e.message : "Error al guardar");
+      }
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -265,35 +303,7 @@ function CustomersPage() {
           <DialogHeader>
             <DialogTitle>{editing ? "Editar cliente" : "Nuevo cliente"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit(async (v) => {
-            log("MUTATION_START", { entity: "customer", editing: !!editing });
-            try {
-              log("MUTATION_BEFORE_AWAIT", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
-              const result = await saveMut.mutateAsync(v);
-              log("MUTATION_AFTER_AWAIT", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
-              log("MUTATION_SUCCESS", { entity: "customer", offline: result === null });
-              if (result === null) {
-                toast.success("Cliente guardado localmente. Se sincronizará al reconectar.");
-              } else {
-                qc.invalidateQueries({ queryKey: ["customers"] });
-                toast.success(editing ? "Cliente actualizado" : "Cliente creado");
-              }
-              log("FORM_CLOSE", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status, open });
-              log("DIALOG_CLOSE", { entity: "customer" });
-              setOpen(false);
-            } catch (e) {
-              log("MUTATION_ERROR", { entity: "customer", error: String(e) }, "error");
-              if (e instanceof Error && e.message.includes("customers_nombre_telefono_owner_unique")) {
-                toast.error("Ya existe un cliente con el mismo nombre y teléfono");
-              } else if (e instanceof Error && e.message.includes("customers_email_check")) {
-                toast.error("El email no es válido");
-              } else {
-                toast.error(e instanceof Error ? e.message : "Error al guardar");
-              }
-            } finally {
-              log("MUTATION_SETTLED", { entity: "customer", isPending: saveMut.isPending, status: saveMut.status });
-            }
-          })} className="space-y-4">
+          <form onSubmit={form.handleSubmit((v) => handleSave(v, knownUpdatedAt))} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="nombre">
@@ -356,6 +366,18 @@ function CustomersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ConflictDialog
+        open={conflictPending && !!editing}
+        onContinue={() => {
+          if (pendingValues) handleSave(pendingValues, null);
+        }}
+        onCancel={() => {
+          setConflictPending(false);
+          setPendingValues(null);
+          setOpen(false);
+        }}
+      />
     </div>
   );
 }

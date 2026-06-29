@@ -1,15 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { Building2, DollarSign, FileText, Hash, ImageIcon, Info, Save } from "lucide-react";
-import { getBusinessSettings, upsertBusinessSettings } from "@/lib/api/settings";
+import { getBusinessSettings, upsertBusinessSettings, ConflictError } from "@/lib/api/settings";
 import { getReceiptSettings, upsertReceiptSettings } from "@/lib/api/receipts";
 import { log } from "@/lib/offline/logger";
 import type { BusinessSettingsInput } from "@/lib/api/settings";
+import { ConflictDialog } from "@/components/ui/conflict-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,8 +27,6 @@ export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({ meta: [{ title: "Configuración del Negocio" }] }),
   component: SettingsPage,
 });
-
-// ─── Zod schema ──────────────────────────────────────────────────────────────
 
 const settingsSchema = z.object({
   nombre_negocio: z.string().trim().min(1, "El nombre del negocio es obligatorio").max(200),
@@ -65,8 +64,6 @@ const DEFAULT_VALUES: SettingsFormValues = {
   observaciones:   "",
 };
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
 function SettingsPage() {
   const qc = useQueryClient();
 
@@ -75,6 +72,10 @@ function SettingsPage() {
     queryFn: getBusinessSettings,
     staleTime: 300_000,
   });
+
+  const knownUpdatedAtRef = useRef<string | null>(null);
+  const [conflictPending, setConflictPending] = useState(false);
+  const [pendingInput, setPendingInput] = useState<BusinessSettingsInput | null>(null);
 
   const {
     register,
@@ -87,9 +88,9 @@ function SettingsPage() {
     defaultValues: DEFAULT_VALUES,
   });
 
-  // Populate form when data loads
   useEffect(() => {
     if (!data) return;
+    knownUpdatedAtRef.current = data.updated_at ?? null;
     reset({
       nombre_negocio:  data.nombre_negocio ?? "",
       razon_social:    data.razon_social ?? "",
@@ -109,30 +110,20 @@ function SettingsPage() {
   }, [data, reset]);
 
   const mut = useMutation({
-    mutationFn: (values: SettingsFormValues) => {
-      const input: BusinessSettingsInput = {
-        nombre_negocio:  values.nombre_negocio,
-        razon_social:    values.razon_social?.trim() || null,
-        telefono:        values.telefono?.trim() || null,
-        email:           values.email?.trim() || null,
-        direccion:       values.direccion?.trim() || null,
-        ciudad:          values.ciudad?.trim() || null,
-        provincia:       values.provincia?.trim() || null,
-        pais:            values.pais?.trim() || null,
-        moneda:          values.moneda,
-        simbolo_moneda:  values.simbolo_moneda,
-        decimales:       values.decimales,
-        logo_url:        values.logo_url?.trim() || null,
-        mensaje_tickets: values.mensaje_tickets?.trim() || null,
-        observaciones:   values.observaciones?.trim() || null,
-      };
-      return upsertBusinessSettings(input);
-    },
+    mutationFn: ({ input, knownUpdatedAt }: { input: BusinessSettingsInput; knownUpdatedAt: string | null }) =>
+      upsertBusinessSettings(input, knownUpdatedAt),
     onSuccess: () => {
       toast.success("Configuración guardada");
       qc.invalidateQueries({ queryKey: ["business_settings"] });
+      setConflictPending(false);
+      setPendingInput(null);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      if (e instanceof ConflictError) {
+        return;
+      }
+      toast.error(e.message);
+    },
   });
 
   useEffect(() => {
@@ -140,6 +131,35 @@ function SettingsPage() {
   }, [mut.isPending, mut.status, mut.isSuccess, mut.isError]);
 
   const logoUrl = watch("logo_url");
+
+  async function handleSave(values: SettingsFormValues, forcedUpdatedAt: string | null) {
+    const input: BusinessSettingsInput = {
+      nombre_negocio:  values.nombre_negocio,
+      razon_social:    values.razon_social?.trim() || null,
+      telefono:        values.telefono?.trim() || null,
+      email:           values.email?.trim() || null,
+      direccion:       values.direccion?.trim() || null,
+      ciudad:          values.ciudad?.trim() || null,
+      provincia:       values.provincia?.trim() || null,
+      pais:            values.pais?.trim() || null,
+      moneda:          values.moneda,
+      simbolo_moneda:  values.simbolo_moneda,
+      decimales:       values.decimales,
+      logo_url:        values.logo_url?.trim() || null,
+      mensaje_tickets: values.mensaje_tickets?.trim() || null,
+      observaciones:   values.observaciones?.trim() || null,
+    };
+    try {
+      await mut.mutateAsync({ input, knownUpdatedAt: forcedUpdatedAt });
+    } catch (e) {
+      if (e instanceof ConflictError) {
+        setPendingInput(input);
+        setConflictPending(true);
+      } else {
+        toast.error(e instanceof Error ? e.message : "Error al guardar");
+      }
+    }
+  }
 
   if (isLoading) {
     return (
@@ -160,12 +180,8 @@ function SettingsPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit((v) => {
-        log("MUTATION_BEFORE_AWAIT", { entity: "settings", isPending: mut.isPending, status: mut.status });
-        mut.mutate(v);
-      })} className="space-y-6">
+      <form onSubmit={handleSubmit((v) => handleSave(v, knownUpdatedAtRef.current))} className="space-y-6">
 
-        {/* ── Datos del negocio ─────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -250,7 +266,6 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* ── Configuración monetaria ───────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -307,7 +322,6 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* ── Identidad visual ─────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -347,7 +361,6 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* ── Información adicional ─────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -383,7 +396,6 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* ── Guardar ───────────────────────────────────────────────────── */}
         <div className="flex justify-end pb-6">
           <Button type="submit" disabled={mut.isPending} className="gap-2 min-w-36">
             <Save className="h-4 w-4" />
@@ -393,12 +405,23 @@ function SettingsPage() {
 
       </form>
 
+      <ConflictDialog
+        open={conflictPending}
+        onContinue={() => {
+          if (pendingInput) {
+            mut.mutate({ input: pendingInput, knownUpdatedAt: null });
+          }
+        }}
+        onCancel={() => {
+          setConflictPending(false);
+          setPendingInput(null);
+        }}
+      />
+
       <ReceiptSettingsSection />
     </div>
   );
 }
-
-// ── Receipt Settings Section ───────────────────────────────────────────────────
 
 const receiptSchema = z.object({
   habilitado:           z.boolean(),
@@ -439,6 +462,34 @@ const RECEIPT_DEFAULTS: ReceiptFormValues = {
   logo_url:             "",
   mensaje_pie:          "",
 };
+
+function SwitchRow({
+  control,
+  name,
+  label,
+  description,
+}: {
+  control: any;
+  name: keyof ReceiptFormValues;
+  label: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+      </div>
+      <Controller
+        control={control}
+        name={name}
+        render={({ field }) => (
+          <Switch checked={field.value as boolean} onCheckedChange={field.onChange} />
+        )}
+      />
+    </div>
+  );
+}
 
 function ReceiptSettingsSection() {
   const qc = useQueryClient();
@@ -531,7 +582,6 @@ function ReceiptSettingsSection() {
         </CardHeader>
         <CardContent className="space-y-6">
 
-          {/* Activar comprobantes */}
           <div className="flex items-center justify-between">
             <div>
               <p className="font-medium text-sm">Activar comprobantes</p>
@@ -552,7 +602,6 @@ function ReceiptSettingsSection() {
             <>
               <Separator />
 
-              {/* Comportamiento post-venta */}
               <div className="space-y-3">
                 <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider text-xs">
                   Comportamiento post-venta
@@ -579,7 +628,6 @@ function ReceiptSettingsSection() {
 
               <Separator />
 
-              {/* Formato y numeración */}
               <div className="space-y-4">
                 <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider text-xs">
                   Formato y numeración
@@ -607,9 +655,13 @@ function ReceiptSettingsSection() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label htmlFor="prefijo_numeracion">Prefijo</Label>
+                    <Label htmlFor="prefijo_numeracion">
+                      <Hash className="inline h-3 w-3 mr-1" />
+                      Prefijo
+                    </Label>
                     <Input
                       id="prefijo_numeracion"
+                      maxLength={10}
                       placeholder="V"
                       {...register("prefijo_numeracion")}
                     />
@@ -619,17 +671,14 @@ function ReceiptSettingsSection() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label htmlFor="proximo_numero" className="flex items-center gap-1">
-                      <Hash className="h-3 w-3" />
-                      Próximo número
-                    </Label>
+                    <Label htmlFor="proximo_numero">Próximo número</Label>
                     <Input
                       id="proximo_numero"
                       type="number"
                       min={1}
+                      step={1}
                       {...register("proximo_numero")}
                     />
-                    <p className="text-xs text-muted-foreground">El próximo comprobante tendrá este número.</p>
                     {errors.proximo_numero && (
                       <p className="text-xs text-destructive">{errors.proximo_numero.message}</p>
                     )}
@@ -639,100 +688,67 @@ function ReceiptSettingsSection() {
 
               <Separator />
 
-              {/* Datos del emisor */}
               <div className="space-y-4">
                 <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider text-xs">
-                  Datos del emisor (opcionales — si no se completan se usan los del negocio)
+                  Datos del emisor
                 </p>
-
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="r_nombre_comercial">Nombre comercial</Label>
-                    <Input id="r_nombre_comercial" placeholder="Igual al del negocio" {...register("nombre_comercial")} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="r_razon_social">Razón social</Label>
-                    <Input id="r_razon_social" {...register("razon_social")} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="r_cuit">CUIT</Label>
-                    <Input id="r_cuit" placeholder="20-12345678-9" {...register("cuit")} />
+                    <Label htmlFor="nombre_comercial">Nombre comercial</Label>
+                    <Input id="nombre_comercial" {...register("nombre_comercial")} />
                   </div>
                   <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="r_domicilio">Domicilio</Label>
-                    <Input id="r_domicilio" {...register("domicilio")} />
+                    <Label htmlFor="razon_social_receipt">Razón social</Label>
+                    <Input id="razon_social_receipt" {...register("razon_social")} />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="r_telefono">Teléfono</Label>
-                    <Input id="r_telefono" {...register("telefono")} />
+                    <Label htmlFor="cuit">CUIT / RUT / NIT</Label>
+                    <Input id="cuit" {...register("cuit")} />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="r_email">Email</Label>
-                    <Input id="r_email" type="email" {...register("email")} />
-                    {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="r_sitio_web">Sitio web</Label>
-                    <Input id="r_sitio_web" placeholder="https://..." {...register("sitio_web")} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="r_logo_url" className="flex items-center gap-1">
-                      <ImageIcon className="h-3 w-3" />
-                      URL del logo
-                    </Label>
-                    <Input id="r_logo_url" placeholder="https://..." {...register("logo_url")} />
-                    {errors.logo_url && <p className="text-xs text-destructive">{errors.logo_url.message}</p>}
+                    <Label htmlFor="telefono_receipt">Teléfono</Label>
+                    <Input id="telefono_receipt" type="tel" {...register("telefono")} />
                   </div>
                   <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="r_mensaje_pie">Mensaje al pie del comprobante</Label>
-                    <Textarea
-                      id="r_mensaje_pie"
-                      rows={2}
-                      placeholder="¡Gracias por su compra!"
-                      {...register("mensaje_pie")}
-                    />
+                    <Label htmlFor="domicilio">Domicilio fiscal</Label>
+                    <Input id="domicilio" {...register("domicilio")} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email_receipt">Email</Label>
+                    <Input id="email_receipt" type="email" {...register("email")} />
+                    {errors.email && (
+                      <p className="text-xs text-destructive">{errors.email.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sitio_web">Sitio web</Label>
+                    <Input id="sitio_web" {...register("sitio_web")} />
+                  </div>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="logo_url_receipt">URL del logo</Label>
+                    <Input id="logo_url_receipt" type="url" {...register("logo_url")} />
+                    {errors.logo_url && (
+                      <p className="text-xs text-destructive">{errors.logo_url.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="mensaje_pie">Mensaje de pie</Label>
+                    <Textarea id="mensaje_pie" rows={2} {...register("mensaje_pie")} />
                   </div>
                 </div>
               </div>
             </>
           )}
+
         </CardContent>
       </Card>
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={mut.isPending} className="gap-2 min-w-44">
+        <Button type="submit" disabled={mut.isPending} className="gap-2 min-w-36">
           <Save className="h-4 w-4" />
           {mut.isPending ? "Guardando…" : "Guardar comprobantes"}
         </Button>
       </div>
     </form>
-  );
-}
-
-function SwitchRow({
-  control,
-  name,
-  label,
-  description,
-}: {
-  control: ReturnType<typeof useForm<ReceiptFormValues>>["control"];
-  name: keyof ReceiptFormValues;
-  label: string;
-  description: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <Controller
-        control={control}
-        name={name as any}
-        render={({ field }) => (
-          <Switch checked={!!field.value} onCheckedChange={field.onChange} />
-        )}
-      />
-    </div>
   );
 }

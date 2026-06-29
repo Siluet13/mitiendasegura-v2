@@ -1,3 +1,7 @@
+import { ConflictError } from "./errors";
+
+export { ConflictError };
+
 const API = "";
 
 export type Category = {
@@ -38,6 +42,7 @@ export type Customer = {
   direccion: string | null;
   observaciones: string | null;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type Sale = {
@@ -117,6 +122,7 @@ async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: n
       signal,
     });
     clearTimeout(timerId);
+    if (res.status === 409) throw new ConflictError();
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: res.statusText }));
       throw new Error(err.message ?? res.statusText);
@@ -137,8 +143,10 @@ export async function createCategory(input: { nombre: string }) {
   return apiFetch("/api/categories", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
 }
 
-export async function updateCategory(id: string, input: { nombre: string }) {
-  return apiFetch(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(input) });
+export async function updateCategory(id: string, input: { nombre: string }, knownUpdatedAt?: string | null) {
+  const headers: Record<string, string> = {};
+  if (knownUpdatedAt) headers["X-If-Unmodified-Since"] = knownUpdatedAt;
+  return apiFetch(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(input), headers });
 }
 
 export async function deleteCategory(id: string) {
@@ -154,8 +162,10 @@ export async function createProduct(input: ProductInput): Promise<{ id: string }
   return apiFetch<{ id: string }>("/api/products", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
 }
 
-export async function updateProduct(id: string, input: ProductInput) {
-  return apiFetch(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(input) });
+export async function updateProduct(id: string, input: ProductInput, knownUpdatedAt?: string | null) {
+  const headers: Record<string, string> = {};
+  if (knownUpdatedAt) headers["X-If-Unmodified-Since"] = knownUpdatedAt;
+  return apiFetch(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(input), headers });
 }
 
 export async function deleteProduct(id: string) {
@@ -179,8 +189,10 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
   return apiFetch("/api/customers", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
 }
 
-export async function updateCustomer(id: string, input: CustomerInput): Promise<Customer> {
-  return apiFetch(`/api/customers/${id}`, { method: "PUT", body: JSON.stringify(input) });
+export async function updateCustomer(id: string, input: CustomerInput, knownUpdatedAt?: string | null): Promise<Customer> {
+  const headers: Record<string, string> = {};
+  if (knownUpdatedAt) headers["X-If-Unmodified-Since"] = knownUpdatedAt;
+  return apiFetch(`/api/customers/${id}`, { method: "PUT", body: JSON.stringify(input), headers });
 }
 
 export async function deleteCustomer(id: string) {

@@ -18,10 +18,17 @@ function noTenant(res: any) {
   return res.status(500).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
 }
 
+function parseIfUnmodifiedSince(req: any): Date | null {
+  const header = req.headers["x-if-unmodified-since"];
+  if (!header || typeof header !== "string") return null;
+  const d = new Date(header);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 export function registerInventoryRoutes(app: Express): void {
   // ── Categories ────────────────────────────────────────────────────────────
   app.get("/api/categories", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
       .select()
@@ -49,6 +56,18 @@ export function registerInventoryRoutes(app: Express): void {
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     const { nombre } = req.body;
+
+    const clientDate = parseIfUnmodifiedSince(req);
+    if (clientDate) {
+      const [current] = await db
+        .select({ updatedAt: categories.updatedAt })
+        .from(categories)
+        .where(and(eq(categories.id, id), eq(categories.tenantId, tenantId)));
+      if (current && current.updatedAt > clientDate) {
+        return res.status(409).json({ message: "Conflict" });
+      }
+    }
+
     const [row] = await db
       .update(categories)
       .set({ nombre, updatedAt: new Date() })
@@ -60,18 +79,19 @@ export function registerInventoryRoutes(app: Express): void {
   });
 
   app.delete("/api/categories/:id", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     await db
       .delete(categories)
       .where(and(eq(categories.id, id), eq(categories.tenantId, tenantId)));
+    broadcast(tenantId, { type: "invalidate", entities: ["categories", "products"] });
     res.json({ ok: true });
   });
 
   // ── Products ──────────────────────────────────────────────────────────────
   app.get("/api/products", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
       .select({
@@ -124,10 +144,22 @@ export function registerInventoryRoutes(app: Express): void {
   });
 
   app.put("/api/products/:id", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     const body = req.body;
+
+    const clientDate = parseIfUnmodifiedSince(req);
+    if (clientDate) {
+      const [current] = await db
+        .select({ updatedAt: products.updatedAt })
+        .from(products)
+        .where(and(eq(products.id, id), eq(products.tenantId, tenantId)));
+      if (current && current.updatedAt > clientDate) {
+        return res.status(409).json({ message: "Conflict" });
+      }
+    }
+
     const [row] = await db
       .update(products)
       .set({
@@ -151,18 +183,19 @@ export function registerInventoryRoutes(app: Express): void {
   });
 
   app.delete("/api/products/:id", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     await db
       .delete(products)
       .where(and(eq(products.id, id), eq(products.tenantId, tenantId)));
+    broadcast(tenantId, { type: "invalidate", entities: ["products"] });
     res.json({ ok: true });
   });
 
   // ── Customers ─────────────────────────────────────────────────────────────
   app.get("/api/customers", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
       .select()
@@ -193,10 +226,22 @@ export function registerInventoryRoutes(app: Express): void {
   });
 
   app.put("/api/customers/:id", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     const body = req.body;
+
+    const clientDate = parseIfUnmodifiedSince(req);
+    if (clientDate) {
+      const [current] = await db
+        .select({ updatedAt: customers.updatedAt })
+        .from(customers)
+        .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)));
+      if (current && current.updatedAt > clientDate) {
+        return res.status(409).json({ message: "Conflict" });
+      }
+    }
+
     const [row] = await db
       .update(customers)
       .set({
@@ -205,6 +250,7 @@ export function registerInventoryRoutes(app: Express): void {
         email: body.email ?? null,
         direccion: body.direccion ?? null,
         observaciones: body.observaciones ?? null,
+        updatedAt: new Date(),
       })
       .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
       .returning();
@@ -214,18 +260,19 @@ export function registerInventoryRoutes(app: Express): void {
   });
 
   app.delete("/api/customers/:id", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     await db
       .delete(customers)
       .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)));
+    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
     res.json({ ok: true });
   });
 
   // ── Sales ─────────────────────────────────────────────────────────────────
   app.get("/api/sales", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
       .select()
@@ -236,7 +283,7 @@ export function registerInventoryRoutes(app: Express): void {
   });
 
   app.get("/api/sales/:id", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     const [sale] = await db
@@ -413,7 +460,7 @@ export function registerInventoryRoutes(app: Express): void {
 
   // ── Stock Movements ───────────────────────────────────────────────────────
   app.get("/api/stock-movements", isAuthenticated, async (req, res) => {
-    const { userId, tenantId } = requireTenant(req);
+    const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const productId = (req as any).query.productId as string | undefined;
 
@@ -476,6 +523,7 @@ export function registerInventoryRoutes(app: Express): void {
     const newStock = tipo === "entrada" ? prod.stock + cantidad : prod.stock - cantidad;
     await db.update(products).set({ stock: newStock, updatedAt: new Date() }).where(eq(products.id, product_id));
 
+    broadcast(tenantId, { type: "invalidate", entities: ["stock_movements", "products"] });
     res.json(mv);
   });
 }

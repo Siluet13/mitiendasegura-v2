@@ -12,12 +12,14 @@ import {
   listCategories,
   listProducts,
   updateProduct,
+  ConflictError,
   type Product,
   type ProductInput,
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { enqueue, isNetworkError } from "@/lib/offline/queue";
 import { log } from "@/lib/offline/logger";
+import { ConflictDialog } from "@/components/ui/conflict-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -73,9 +75,9 @@ const defaults: FormValues = {
   activo: true,
 };
 
-// Prefix used to identify optimistic offline entries in the cache.
-// On sync, the real ID replaces this entry.
 const OFFLINE_ID_PREFIX = "offline_";
+
+type MutInput = { values: FormValues; knownUpdatedAt: string | null };
 
 function ProductsPage() {
   const qc = useQueryClient();
@@ -89,6 +91,9 @@ function ProductsPage() {
   const [deleting, setDeleting] = useState<Product | null>(null);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState<string>(ALL_CAT);
+  const [knownUpdatedAt, setKnownUpdatedAt] = useState<string | null>(null);
+  const [conflictPending, setConflictPending] = useState(false);
+  const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
 
   const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: defaults });
 
@@ -110,16 +115,19 @@ function ProductsPage() {
   }, [products, search, catFilter]);
 
   function openNew() {
-    log("FORM_OPEN", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
-    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(null);
+    setKnownUpdatedAt(null);
+    setConflictPending(false);
+    setPendingValues(null);
     form.reset(defaults);
     setOpen(true);
   }
+
   function openEdit(p: Product) {
-    log("FORM_OPEN", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
-    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
     setEditing(p);
+    setKnownUpdatedAt(p.updatedAt ?? null);
+    setConflictPending(false);
+    setPendingValues(null);
     const ext = p as Product & { codigo_barras?: string | null; costo?: number | string };
     form.reset({
       nombre: p.nombre,
@@ -137,7 +145,7 @@ function ProductsPage() {
   }
 
   const saveMut = useMutation({
-    mutationFn: async (values: FormValues): Promise<{ offlineId: string; payload: ProductInput } | { created: true }> => {
+    mutationFn: async ({ values, knownUpdatedAt }: MutInput): Promise<{ offlineId: string; payload: ProductInput } | { created: true }> => {
       const payload: ProductInput = {
         nombre: values.nombre,
         descripcion: values.descripcion?.trim() ? values.descripcion : null,
@@ -151,18 +159,14 @@ function ProductsPage() {
         activo: values.activo,
       };
       if (editing) {
-        await updateProduct(editing.id, payload);
+        await updateProduct(editing.id, payload, knownUpdatedAt);
         return { created: true };
       }
       log("PRODUCT_CREATE_START", { nombre: payload.nombre });
       if (!isOnline || !navigator.onLine) {
-        // BUG #2 FIX: generate a stable offline_id so the cache entry and the
-        // enqueued op share the same key. sync.ts uses this to build the idMap
-        // and invalidate once the real record exists server-side.
         const offlineId = `${OFFLINE_ID_PREFIX}${crypto.randomUUID()}`;
         await enqueue("product_create", { ...payload, offline_id: offlineId });
         log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, offlineId, trigger: "offline" });
-        log("OFFLINE_RETURN_START", { entity: "product", trigger: "offline" });
         return { offlineId, payload };
       }
       try {
@@ -173,7 +177,6 @@ function ProductsPage() {
           const offlineId = `${OFFLINE_ID_PREFIX}${crypto.randomUUID()}`;
           await enqueue("product_create", { ...payload, offline_id: offlineId });
           log("PRODUCT_CREATE_ENQUEUED", { nombre: payload.nombre, offlineId, trigger: "network_error" });
-          log("OFFLINE_RETURN_START", { entity: "product", trigger: "network_error" });
           return { offlineId, payload };
         }
         throw e;
@@ -194,6 +197,55 @@ function ProductsPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  async function handleSave(values: FormValues, forcedUpdatedAt: string | null) {
+    try {
+      const result = await saveMut.mutateAsync({ values, knownUpdatedAt: forcedUpdatedAt });
+      if ("offlineId" in result) {
+        const now = new Date().toISOString();
+        const categoryName = values.category_id && values.category_id !== NO_CAT
+          ? categories.find((c) => c.id === values.category_id)?.nombre ?? null
+          : null;
+        const optimisticProduct: Product = {
+          id: result.offlineId,
+          ownerId: "",
+          categoryId: result.payload.category_id ?? null,
+          category_id: result.payload.category_id ?? null,
+          nombre: result.payload.nombre,
+          descripcion: result.payload.descripcion ?? null,
+          sku: result.payload.sku ?? null,
+          codigoBarras: result.payload.codigo_barras ?? null,
+          codigo_barras: result.payload.codigo_barras ?? null,
+          precio: result.payload.precio,
+          costo: result.payload.costo,
+          stock: result.payload.stock,
+          stockMinimo: result.payload.stock_minimo,
+          stock_minimo: result.payload.stock_minimo,
+          activo: result.payload.activo,
+          createdAt: now,
+          updatedAt: now,
+          categories: categoryName ? { nombre: categoryName } : null,
+        };
+        qc.setQueryData<Product[]>(["products"], (old = []) => [...old, optimisticProduct]);
+        toast.success("Producto guardado localmente. Se sincronizará al reconectar.");
+      } else {
+        qc.invalidateQueries({ queryKey: ["products"] });
+        toast.success(editing ? "Producto actualizado" : "Producto creado");
+      }
+      form.reset(defaults);
+      setOpen(false);
+      setConflictPending(false);
+      setPendingValues(null);
+    } catch (e) {
+      if (e instanceof ConflictError) {
+        setPendingValues(values);
+        setConflictPending(true);
+        return;
+      }
+      log("MUTATION_ERROR", { entity: "product", error: String(e) }, "error");
+      toast.error(e instanceof Error ? e.message : "Error al guardar");
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -308,66 +360,7 @@ function ProductsPage() {
           <DialogHeader>
             <DialogTitle>{editing ? "Editar producto" : "Nuevo producto"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit(async (v) => {
-            log("MUTATION_START", { entity: "product", editing: !!editing });
-            try {
-              log("MUTATION_BEFORE_AWAIT", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
-              const result = await saveMut.mutateAsync(v);
-              log("MUTATION_AFTER_AWAIT", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
-              log("AFTER_MUTATE_ASYNC", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, isPaused: saveMut.isPaused });
-              if ("offlineId" in result) {
-                // BUG #2 FIX: inject a synthetic Product into the TanStack Query cache
-                // immediately so the product appears in the grid without waiting for sync.
-                // The entry is marked with the offline_id prefix (OFFLINE_ID_PREFIX) so the
-                // row renders with a "pendiente" badge and edit/delete are disabled.
-                // sync.ts will invalidateQueries(["products"]) after the real record is
-                // created server-side, replacing this entry with the canonical data.
-                const now = new Date().toISOString();
-                const categoryName = v.category_id && v.category_id !== NO_CAT
-                  ? categories.find((c) => c.id === v.category_id)?.nombre ?? null
-                  : null;
-                const optimisticProduct: Product = {
-                  id: result.offlineId,
-                  ownerId: "",
-                  categoryId: result.payload.category_id ?? null,
-                  category_id: result.payload.category_id ?? null,
-                  nombre: result.payload.nombre,
-                  descripcion: result.payload.descripcion ?? null,
-                  sku: result.payload.sku ?? null,
-                  codigoBarras: result.payload.codigo_barras ?? null,
-                  codigo_barras: result.payload.codigo_barras ?? null,
-                  precio: result.payload.precio,
-                  costo: result.payload.costo,
-                  stock: result.payload.stock,
-                  stockMinimo: result.payload.stock_minimo,
-                  stock_minimo: result.payload.stock_minimo,
-                  activo: result.payload.activo,
-                  createdAt: now,
-                  updatedAt: now,
-                  categories: categoryName ? { nombre: categoryName } : null,
-                };
-                qc.setQueryData<Product[]>(["products"], (old = []) => [
-                  ...old,
-                  optimisticProduct,
-                ]);
-                log("PRODUCT_CACHE_OPTIMISTIC", { offlineId: result.offlineId, nombre: result.payload.nombre });
-                toast.success("Producto guardado localmente. Se sincronizará al reconectar.");
-              } else {
-                qc.invalidateQueries({ queryKey: ["products"] });
-                toast.success(editing ? "Producto actualizado" : "Producto creado");
-              }
-              log("FORM_RESET", { entity: "product" });
-              form.reset(defaults);
-              log("FORM_CLOSE", { entity: "product", isPending: saveMut.isPending, status: saveMut.status, open });
-              log("DIALOG_CLOSE", { entity: "product" });
-              setOpen(false);
-            } catch (e) {
-              log("MUTATION_ERROR", { entity: "product", error: String(e) }, "error");
-              toast.error(e instanceof Error ? e.message : "Error al guardar");
-            } finally {
-              log("MUTATION_SETTLED", { entity: "product", isPending: saveMut.isPending, status: saveMut.status });
-            }
-          })} className="space-y-4">
+          <form onSubmit={form.handleSubmit((v) => handleSave(v, knownUpdatedAt))} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="nombre">Nombre</Label>
@@ -458,6 +451,18 @@ function ProductsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ConflictDialog
+        open={conflictPending && !!editing}
+        onContinue={() => {
+          if (pendingValues) handleSave(pendingValues, null);
+        }}
+        onCancel={() => {
+          setConflictPending(false);
+          setPendingValues(null);
+          setOpen(false);
+        }}
+      />
     </div>
   );
 }

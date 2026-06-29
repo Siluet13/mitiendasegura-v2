@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
+import { broadcast } from "../lib/events";
 import { businessSettings } from "@shared/schema";
 
 export function registerSettingsRoutes(app: Express): void {
@@ -16,8 +17,22 @@ export function registerSettingsRoutes(app: Express): void {
   });
 
   app.put("/api/settings", isAuthenticated, async (req, res) => {
-    const { userId } = requireTenant(req);
+    const { userId, tenantId } = requireTenant(req);
     const body = req.body;
+
+    const clientDateHeader = req.headers["x-if-unmodified-since"];
+    if (clientDateHeader && typeof clientDateHeader === "string") {
+      const clientDate = new Date(clientDateHeader);
+      if (!isNaN(clientDate.getTime())) {
+        const [current] = await db
+          .select({ updatedAt: businessSettings.updatedAt })
+          .from(businessSettings)
+          .where(eq(businessSettings.ownerId, userId));
+        if (current && current.updatedAt > clientDate) {
+          return res.status(409).json({ message: "Conflict" });
+        }
+      }
+    }
 
     const [row] = await db
       .insert(businessSettings)
@@ -59,6 +74,11 @@ export function registerSettingsRoutes(app: Express): void {
         },
       })
       .returning();
+
+    if (tenantId) {
+      broadcast(tenantId, { type: "invalidate", entities: ["business_settings"] });
+    }
+
     res.json(toResponse(row));
   });
 }

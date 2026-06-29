@@ -56,6 +56,7 @@ export const customers = pgTable("customers", {
   direccion: text("direccion"),
   observaciones: text("observaciones"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   index("customers_tenant_id_idx").on(t.tenantId),
 ]);
