@@ -5,6 +5,8 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { licenses, users, businessSettings, products, customers, sales } from "@shared/schema";
 import type { LicenseStatus } from "@shared/schema";
 
+const CYCLE_DAYS = 30;
+
 const isAdmin: RequestHandler = (req, res, next) => {
   const user = req.user as any;
   if (!req.isAuthenticated() || !user?.claims?.sub) {
@@ -37,6 +39,10 @@ export function registerAdminRoutes(app: Express): void {
         licenseExpiresAt: licenses.expiresAt,
         licenseNotes: licenses.notes,
         nombreNegocio: businessSettings.nombreNegocio,
+        billingCycleStart: businessSettings.billingCycleStart,
+        billingCycleEnd: businessSettings.billingCycleEnd,
+        lastPaymentDate: businessSettings.lastPaymentDate,
+        subscriptionStatus: businessSettings.subscriptionStatus,
         productCount: count(products.id),
         customerCount: count(customers.id),
       })
@@ -55,7 +61,11 @@ export function registerAdminRoutes(app: Express): void {
         licenses.activatedAt,
         licenses.expiresAt,
         licenses.notes,
-        businessSettings.nombreNegocio
+        businessSettings.nombreNegocio,
+        businessSettings.billingCycleStart,
+        businessSettings.billingCycleEnd,
+        businessSettings.lastPaymentDate,
+        businessSettings.subscriptionStatus,
       )
       .orderBy(desc(users.createdAt));
 
@@ -76,7 +86,7 @@ export function registerAdminRoutes(app: Express): void {
         ...b,
         saleCount: ss?.saleCount ?? 0,
         lastSaleAt: ss?.lastSaleAt ?? null,
-        licenseStatus: b.licenseStatus ?? "pendiente",
+        licenseStatus: (b.licenseStatus ?? "pendiente") as LicenseStatus,
       };
     });
 
@@ -114,5 +124,35 @@ export function registerAdminRoutes(app: Express): void {
       .returning();
 
     res.json(updated);
+  });
+
+  app.post("/api/admin/billing/payment/:ownerId", isAuthenticated, isAdmin, async (req, res) => {
+    const ownerId = String(req.params.ownerId);
+    const now = new Date();
+    const end = new Date(now.getTime() + CYCLE_DAYS * 24 * 60 * 60 * 1000);
+
+    await db
+      .update(businessSettings)
+      .set({
+        lastPaymentDate: now,
+        billingCycleStart: now,
+        billingCycleEnd: end,
+        subscriptionStatus: "active",
+        updatedAt: now,
+      })
+      .where(eq(businessSettings.ownerId, ownerId));
+
+    const setFields: Record<string, unknown> = {
+      status: "activa" as LicenseStatus,
+      activatedAt: now,
+      updatedAt: now,
+    };
+
+    await db
+      .insert(licenses)
+      .values({ ownerId, status: "activa" })
+      .onConflictDoUpdate({ target: licenses.ownerId, set: setFields });
+
+    res.json({ ok: true });
   });
 }

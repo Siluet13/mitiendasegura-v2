@@ -1,0 +1,175 @@
+Quiero terminar completamente el sistema de Billing de "Mi Tienda Segura". Antes de escribir código, auditá el proyecto para verificar qué partes ya están implementadas y cuáles faltan. No dupliques lógica existente: reutilizá todo lo que ya esté hecho.
+
+## Objetivo
+
+Al finalizar quiero un sistema de billing completamente funcional para administrar las suscripciones de los comercios.
+
+## Requisitos
+
+### 1. Estado de suscripción
+
+Usar los campos existentes de business_settings.
+
+Estados:
+
+* active
+* warning
+* expired
+* suspended
+
+No crear estados duplicados.
+
+---
+
+### 2. API Billing
+
+Implementar (o completar si ya existen):
+
+GET /api/billing/status
+
+Debe devolver:
+
+* estado
+* fecha de inicio
+* fecha de vencimiento
+* días restantes
+* última fecha de pago
+
+---
+
+POST /api/billing/payment
+
+Debe:
+
+* registrar el pago
+* actualizar lastPaymentDate
+* mover billingCycleStart
+* mover billingCycleEnd (+30 días)
+* cambiar estado a active
+
+---
+
+POST /api/billing/suspend
+
+Debe dejar la cuenta suspendida.
+
+---
+
+POST /api/billing/reactivate
+
+Debe volver a active respetando el nuevo ciclo de facturación.
+
+---
+
+### 3. Avisos
+
+Mantener el banner existente.
+
+Completar la lógica para que:
+
+* más de 5 días → no mostrar nada
+* entre 5 y 1 días → aviso amarillo
+* día de vencimiento → aviso rojo
+* vencido → aviso rojo permanente
+
+No bloquear todavía la aplicación.
+
+---
+
+### 4. Panel Maestro
+
+Agregar una sección de Billing donde pueda ver todos los comercios.
+
+Mostrar una tabla con:
+
+* nombre del comercio
+* propietario
+* estado
+* fecha de vencimiento
+* días restantes
+* último pago
+
+Agregar filtros:
+
+* Todos
+* Activos
+* Próximos a vencer
+* Vencidos
+* Suspendidos
+
+Agregar buscador por nombre.
+
+---
+
+### 5. Acciones del administrador
+
+Desde el Panel Maestro poder:
+
+* Registrar pago
+* Suspender comercio
+* Reactivar comercio
+
+Todo debe reflejarse inmediatamente en la base de datos.
+
+---
+
+### 6. Multi-tenant
+
+Verificar que todas las consultas respeten completamente el aislamiento entre comercios.
+
+El Panel Maestro es el único lugar donde el administrador puede visualizar todos los tenants.
+
+---
+
+### 7. Frontend
+
+No romper ninguna funcionalidad existente.
+
+Reutilizar componentes cuando sea posible.
+
+Mantener el mismo estilo visual de la aplicación.
+
+---
+
+### 8. Restricciones
+
+NO implementar Mercado Pago.
+
+NO implementar Stripe.
+
+NO implementar cobro automático.
+
+NO implementar emails.
+
+NO modificar POS.
+
+NO modificar sincronización.
+
+NO modificar PWA.
+
+NO modificar Backup.
+
+NO modificar Facturación.
+
+---
+
+### 9. Verificación
+
+Al finalizar:
+
+* ejecutar TypeScript
+* verificar que compile
+* verificar que la aplicación inicie correctamente
+* comprobar que el billing funciona de punta a punta
+
+---
+
+### 10. Informe final
+
+Entregar:
+
+1. Qué ya existía.
+2. Qué se implementó.
+3. Archivos modificados.
+4. Cómo quedó el flujo completo del billing.
+5. Confirmar que no quedaron tareas pendientes para el sistema de billing (excepto futuras integraciones con pasarelas de pago como Mercado Pago o Stripe).

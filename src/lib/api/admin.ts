@@ -24,6 +24,10 @@ export interface BusinessRow {
   licenseExpiresAt: string | null;
   licenseNotes: string | null;
   nombreNegocio: string | null;
+  billingCycleStart: string | null;
+  billingCycleEnd: string | null;
+  lastPaymentDate: string | null;
+  subscriptionStatus: string | null;
   productCount: number;
   customerCount: number;
   saleCount: number;
@@ -46,4 +50,8 @@ export async function updateLicense(
     method: "PUT",
     body: JSON.stringify(input),
   });
+}
+
+export async function registerPayment(ownerId: string): Promise<void> {
+  await apiFetch(`/api/admin/billing/payment/${ownerId}`, { method: "POST" });
 }

@@ -7,6 +7,7 @@ import { registerDashboardRoutes } from "./api/dashboard";
 import { registerSettingsRoutes } from "./api/settings";
 import { registerBackupRoutes } from "./api/backup";
 import { registerLicenseRoutes } from "./api/license";
+import { registerBillingRoutes } from "./api/billing";
 import { registerAdminRoutes } from "./api/admin";
 import { registerEventsRoutes } from "./api/events";
 import { registerReceiptsRoutes } from "./api/receipts";
@@ -40,6 +41,7 @@ if (existsSync(clientDir)) {
   registerAuthRoutes(app);
   registerEventsRoutes(app);
   registerLicenseRoutes(app);
+  registerBillingRoutes(app);
   registerAdminRoutes(app);
 
   app.use("/api", checkLicense);
