@@ -93,3 +93,18 @@ export async function updateBusinessSettings(
 export async function registerPayment(ownerId: string): Promise<void> {
   await apiFetch(`/api/admin/billing/payment/${ownerId}`, { method: "POST" });
 }
+
+export interface DevStats {
+  totalBusinesses: number;
+  totalUsers: number;
+  totalProducts: number;
+  totalSales: number;
+  serverUptime: number;
+  appVersion: string;
+  buildDate: string | null;
+  nodeVersion: string;
+}
+
+export async function getDevStats(): Promise<DevStats> {
+  return apiFetch("/api/admin/dev/stats");
+}

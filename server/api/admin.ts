@@ -236,6 +236,26 @@ export function registerAdminRoutes(app: Express): void {
     res.json(updated);
   }));
 
+  app.get("/api/admin/dev/stats", isAuthenticated, isAdmin, wrapAsync(async (_req, res) => {
+    const [biz, usr, prod, sale] = await Promise.all([
+      db.select({ c: count() }).from(tenants),
+      db.select({ c: count() }).from(users),
+      db.select({ c: count() }).from(products),
+      db.select({ c: count() }).from(sales),
+    ]);
+
+    res.json({
+      totalBusinesses: Number(biz[0]?.c ?? 0),
+      totalUsers: Number(usr[0]?.c ?? 0),
+      totalProducts: Number(prod[0]?.c ?? 0),
+      totalSales: Number(sale[0]?.c ?? 0),
+      serverUptime: Math.floor(process.uptime()),
+      appVersion: process.env.npm_package_version ?? "1.0.0",
+      buildDate: process.env.BUILD_DATE ?? null,
+      nodeVersion: process.version,
+    });
+  }));
+
   app.post("/api/admin/billing/payment/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
     const ownerId = String(req.params.ownerId);
     const now = new Date();
