@@ -34,12 +34,35 @@ export interface BusinessRow {
   lastSaleAt: string | null;
 }
 
+export interface BusinessDetail {
+  ownerId: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  registeredAt: string | null;
+  licenseStatus: LicenseStatus;
+  licenseActivatedAt: string | null;
+  licenseExpiresAt: string | null;
+  licenseSuspendedAt: string | null;
+  licenseNotes: string | null;
+  nombreNegocio: string | null;
+  billingCycleStart: string | null;
+  billingCycleEnd: string | null;
+  lastPaymentDate: string | null;
+  subscriptionStatus: string | null;
+  tenantId: string | null;
+}
+
 export async function getAdminMe(): Promise<{ isAdmin: boolean }> {
   return apiFetch("/api/admin/me");
 }
 
 export async function listBusinesses(): Promise<BusinessRow[]> {
   return apiFetch("/api/admin/businesses");
+}
+
+export async function getBusinessDetail(ownerId: string): Promise<BusinessDetail> {
+  return apiFetch(`/api/admin/businesses/${ownerId}`);
 }
 
 export async function updateLicense(

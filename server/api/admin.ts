@@ -2,8 +2,9 @@ import type { Express, RequestHandler } from "express";
 import { eq, desc, count, sql } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
-import { licenses, users, businessSettings, products, customers, sales } from "@shared/schema";
+import { licenses, users, businessSettings, tenants, products, customers, sales } from "@shared/schema";
 import type { LicenseStatus } from "@shared/schema";
+import { wrapAsync } from "../lib/asyncHandler";
 
 const CYCLE_DAYS = 30;
 
@@ -92,6 +93,42 @@ export function registerAdminRoutes(app: Express): void {
 
     res.json(result);
   });
+
+  app.get("/api/admin/businesses/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
+    const ownerId = String(req.params.ownerId);
+
+    const [row] = await db
+      .select({
+        ownerId: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        registeredAt: users.createdAt,
+        licenseStatus: licenses.status,
+        licenseActivatedAt: licenses.activatedAt,
+        licenseExpiresAt: licenses.expiresAt,
+        licenseSuspendedAt: licenses.suspendedAt,
+        licenseNotes: licenses.notes,
+        nombreNegocio: businessSettings.nombreNegocio,
+        billingCycleStart: businessSettings.billingCycleStart,
+        billingCycleEnd: businessSettings.billingCycleEnd,
+        lastPaymentDate: businessSettings.lastPaymentDate,
+        subscriptionStatus: businessSettings.subscriptionStatus,
+        tenantId: tenants.id,
+      })
+      .from(users)
+      .leftJoin(licenses, eq(licenses.ownerId, users.id))
+      .leftJoin(businessSettings, eq(businessSettings.ownerId, users.id))
+      .leftJoin(tenants, eq(tenants.ownerId, users.id))
+      .where(eq(users.id, ownerId));
+
+    if (!row) return res.status(404).json({ message: "Comercio no encontrado" });
+
+    res.json({
+      ...row,
+      licenseStatus: (row.licenseStatus ?? "pendiente") as LicenseStatus,
+    });
+  }));
 
   app.put("/api/admin/licenses/:ownerId", isAuthenticated, isAdmin, async (req, res) => {
     const ownerId = String(req.params.ownerId);
