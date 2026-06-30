@@ -3,3 +3,4 @@ export * from "./models/tenants";
 export * from "./models/inventory";
 export * from "./models/admin";
 export * from "./models/receipts";
+export * from "./models/cash";
