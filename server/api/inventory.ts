@@ -190,14 +190,14 @@ export function registerInventoryRoutes(app: Express): void {
       await db
         .delete(products)
         .where(and(eq(products.id, id), eq(products.tenantId, tenantId)));
-      broadcast(tenantId, { type: "invalidate", entities: ["products"] });
       res.json({ ok: true });
+      broadcast(tenantId, { type: "invalidate", entities: ["products"] });
     } catch (err: any) {
       if (err?.code === "23503") {
         const detail: string = err?.detail ?? err?.message ?? "";
         if (detail.includes("sale_items")) {
           return res.status(409).json({
-            message: "No se puede eliminar: el producto tiene ventas registradas. Eliminá las ventas primero o desactivá el producto.",
+            message: "No se puede eliminar: el producto tiene ventas registradas. Desactivá el producto en su lugar.",
           });
         }
         if (detail.includes("stock_movements")) {
@@ -209,7 +209,9 @@ export function registerInventoryRoutes(app: Express): void {
           message: "No se puede eliminar: el producto está referenciado en otros registros.",
         });
       }
-      throw err;
+      return res.status(500).json({
+        message: "Error interno al eliminar el producto.",
+      });
     }
   });
 

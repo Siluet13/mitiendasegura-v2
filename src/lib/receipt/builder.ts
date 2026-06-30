@@ -19,10 +19,10 @@ export function buildReceiptData(
 
   const nombreComercial =
     receiptCfg.nombre_comercial?.trim() ||
-    businessSettings?.nombre_negocio ||
+    businessSettings?.nombreNegocio ||
     "Mi Negocio";
 
-  const simboloMoneda = businessSettings?.simbolo_moneda ?? "$";
+  const simboloMoneda = businessSettings?.simboloMoneda ?? "$";
 
   return {
     receiptNumber,
@@ -32,14 +32,14 @@ export function buildReceiptData(
     total: Number(sale.total),
     observacion: sale.observacion ?? null,
     nombreComercial,
-    razonSocial: receiptCfg.razon_social ?? businessSettings?.razon_social ?? null,
+    razonSocial: receiptCfg.razon_social ?? businessSettings?.razonSocial ?? null,
     cuit: receiptCfg.cuit ?? null,
     domicilio: receiptCfg.domicilio ?? businessSettings?.direccion ?? null,
     telefono: receiptCfg.telefono ?? businessSettings?.telefono ?? null,
     email: receiptCfg.email ?? businessSettings?.email ?? null,
     sitioWeb: receiptCfg.sitio_web ?? null,
-    logoUrl: receiptCfg.logo_url ?? businessSettings?.logo_url ?? null,
-    mensajePie: receiptCfg.mensaje_pie ?? businessSettings?.mensaje_tickets ?? null,
+    logoUrl: receiptCfg.logo_url ?? businessSettings?.logoUrl ?? null,
+    mensajePie: receiptCfg.mensaje_pie ?? businessSettings?.mensajeTickets ?? null,
     tipoComprobante: (receiptCfg.tipo_comprobante ?? "ticket_80mm") as ReceiptFormat,
     simboloMoneda,
   };
