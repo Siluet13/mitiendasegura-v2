@@ -5,6 +5,7 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { licenses, users, businessSettings, tenants, products, customers, sales } from "@shared/schema";
 import type { LicenseStatus } from "@shared/schema";
 import { wrapAsync } from "../lib/asyncHandler";
+import { broadcast } from "../lib/events";
 
 const CYCLE_DAYS = 30;
 
@@ -19,6 +20,24 @@ const isAdmin: RequestHandler = (req, res, next) => {
   }
   next();
 };
+
+async function getTenantId(ownerId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.ownerId, ownerId))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+async function broadcastToTenant(ownerId: string, entities: string[]): Promise<void> {
+  try {
+    const tenantId = await getTenantId(ownerId);
+    if (tenantId) {
+      broadcast(tenantId, { type: "invalidate", entities });
+    }
+  } catch {}
+}
 
 export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/me", isAuthenticated, (req: any, res) => {
@@ -130,7 +149,47 @@ export function registerAdminRoutes(app: Express): void {
     });
   }));
 
-  app.put("/api/admin/licenses/:ownerId", isAuthenticated, isAdmin, async (req, res) => {
+  app.put("/api/admin/businesses/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
+    const ownerId = String(req.params.ownerId);
+    const { nombreNegocio, billingCycleEnd } = req.body as {
+      nombreNegocio?: string;
+      billingCycleEnd?: string | null;
+    };
+
+    const now = new Date();
+    const settingsFields: Record<string, unknown> = { updatedAt: now };
+
+    if (nombreNegocio !== undefined && nombreNegocio.trim() !== "") {
+      settingsFields.nombreNegocio = nombreNegocio.trim();
+    }
+    if (billingCycleEnd !== undefined && billingCycleEnd !== null) {
+      settingsFields.billingCycleEnd = new Date(billingCycleEnd);
+    }
+
+    if (Object.keys(settingsFields).length > 1) {
+      await db
+        .update(businessSettings)
+        .set(settingsFields as any)
+        .where(eq(businessSettings.ownerId, ownerId));
+    }
+
+    if (billingCycleEnd !== undefined && billingCycleEnd !== null) {
+      const expDate = new Date(billingCycleEnd);
+      await db
+        .insert(licenses)
+        .values({ ownerId, status: "activa", expiresAt: expDate })
+        .onConflictDoUpdate({
+          target: licenses.ownerId,
+          set: { expiresAt: expDate, updatedAt: now },
+        });
+    }
+
+    await broadcastToTenant(ownerId, ["settings", "business_settings"]);
+
+    res.json({ ok: true });
+  }));
+
+  app.put("/api/admin/licenses/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
     const ownerId = String(req.params.ownerId);
     const { status, notes, expiresAt } = req.body as {
       status: LicenseStatus;
@@ -160,10 +219,24 @@ export function registerAdminRoutes(app: Express): void {
       .onConflictDoUpdate({ target: licenses.ownerId, set: setFields })
       .returning();
 
-    res.json(updated);
-  });
+    if (status === "suspendida") {
+      await db
+        .update(businessSettings)
+        .set({ subscriptionStatus: "suspended", updatedAt: now })
+        .where(eq(businessSettings.ownerId, ownerId));
+    } else if (status === "activa") {
+      await db
+        .update(businessSettings)
+        .set({ subscriptionStatus: "active", updatedAt: now })
+        .where(eq(businessSettings.ownerId, ownerId));
+    }
 
-  app.post("/api/admin/billing/payment/:ownerId", isAuthenticated, isAdmin, async (req, res) => {
+    await broadcastToTenant(ownerId, ["settings", "business_settings"]);
+
+    res.json(updated);
+  }));
+
+  app.post("/api/admin/billing/payment/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
     const ownerId = String(req.params.ownerId);
     const now = new Date();
     const end = new Date(now.getTime() + CYCLE_DAYS * 24 * 60 * 60 * 1000);
@@ -179,17 +252,21 @@ export function registerAdminRoutes(app: Express): void {
       })
       .where(eq(businessSettings.ownerId, ownerId));
 
-    const setFields: Record<string, unknown> = {
-      status: "activa" as LicenseStatus,
-      activatedAt: now,
-      updatedAt: now,
-    };
-
     await db
       .insert(licenses)
       .values({ ownerId, status: "activa" })
-      .onConflictDoUpdate({ target: licenses.ownerId, set: setFields });
+      .onConflictDoUpdate({
+        target: licenses.ownerId,
+        set: {
+          status: "activa" as LicenseStatus,
+          activatedAt: now,
+          expiresAt: end,
+          updatedAt: now,
+        },
+      });
+
+    await broadcastToTenant(ownerId, ["settings", "business_settings"]);
 
     res.json({ ok: true });
-  });
+  }));
 }

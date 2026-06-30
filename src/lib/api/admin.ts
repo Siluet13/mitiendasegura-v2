@@ -53,6 +53,11 @@ export interface BusinessDetail {
   tenantId: string | null;
 }
 
+export interface BusinessEditInput {
+  nombreNegocio?: string;
+  billingCycleEnd?: string | null;
+}
+
 export async function getAdminMe(): Promise<{ isAdmin: boolean }> {
   return apiFetch("/api/admin/me");
 }
@@ -70,6 +75,16 @@ export async function updateLicense(
   input: { status: LicenseStatus; notes?: string; expiresAt?: string | null }
 ): Promise<void> {
   await apiFetch(`/api/admin/licenses/${ownerId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateBusinessSettings(
+  ownerId: string,
+  input: BusinessEditInput
+): Promise<void> {
+  await apiFetch(`/api/admin/businesses/${ownerId}`, {
     method: "PUT",
     body: JSON.stringify(input),
   });
