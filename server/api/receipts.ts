@@ -17,7 +17,7 @@ export function registerReceiptsRoutes(app: Express): void {
       .from(receiptSettings)
       .where(eq(receiptSettings.tenantId, tenantId));
 
-    res.json(row ?? null);
+    res.json(row ? toResponse(row) : null);
   }));
 
   app.put("/api/receipts/settings", isAuthenticated, wrapAsync(async (req, res) => {
