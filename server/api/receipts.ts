@@ -3,11 +3,12 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
-import { receiptSettings } from "@shared/schema";
+import { wrapAsync } from "../lib/asyncHandler";
 import { broadcast } from "../lib/events";
+import { receiptSettings } from "@shared/schema";
 
 export function registerReceiptsRoutes(app: Express): void {
-  app.get("/api/receipts/settings", isAuthenticated, async (req, res) => {
+  app.get("/api/receipts/settings", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return res.status(500).json({ message: "Tenant no configurado" });
 
@@ -17,9 +18,9 @@ export function registerReceiptsRoutes(app: Express): void {
       .where(eq(receiptSettings.tenantId, tenantId));
 
     res.json(row ?? null);
-  });
+  }));
 
-  app.put("/api/receipts/settings", isAuthenticated, async (req, res) => {
+  app.put("/api/receipts/settings", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return res.status(500).json({ message: "Tenant no configurado" });
 
@@ -58,9 +59,9 @@ export function registerReceiptsRoutes(app: Express): void {
       })
       .returning();
 
-    broadcast(tenantId, { type: "invalidate", entities: ["receipt_settings"] });
     res.json(toResponse(row));
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["receipt_settings"] });
+  }));
 }
 
 function toResponse(r: typeof receiptSettings.$inferSelect) {

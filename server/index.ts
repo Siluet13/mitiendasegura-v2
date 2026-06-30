@@ -83,6 +83,15 @@ if (existsSync(clientDir)) {
     app.get("*splat", ssrHandler);
   }
 
+  app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const status = typeof err?.status === "number" ? err.status : 500;
+    const message = err?.message ?? "Error interno del servidor";
+    const code = err?.code ?? undefined;
+    if (!res.headersSent) {
+      res.status(status).json({ error: message, ...(code ? { code } : {}) });
+    }
+  });
+
   const port = parseInt(process.env.PORT ?? "5001");
   app.listen(port, "0.0.0.0", () => {
     console.log(`API server running on port ${port}`);

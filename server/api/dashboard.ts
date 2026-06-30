@@ -3,6 +3,7 @@ import { eq, and, gte, lt, desc, count, sum } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
+import { wrapAsync } from "../lib/asyncHandler";
 import { products, customers, sales, saleItems } from "@shared/schema";
 
 function todayRange() {
@@ -30,8 +31,7 @@ function noTenant(res: any) {
 }
 
 export function registerDashboardRoutes(app: Express): void {
-  // ── KPIs ──────────────────────────────────────────────────────────────────
-  app.get("/api/dashboard/kpis", isAuthenticated, async (req, res) => {
+  app.get("/api/dashboard/kpis", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const { start, end } = todayRange();
@@ -58,10 +58,9 @@ export function registerDashboardRoutes(app: Express): void {
       activeProducts: activeProductsCount[0]?.count ?? 0,
       totalCustomers: customersCount[0]?.count ?? 0,
     });
-  });
+  }));
 
-  // ── Stock alerts ──────────────────────────────────────────────────────────
-  app.get("/api/dashboard/stock-alerts", isAuthenticated, async (req, res) => {
+  app.get("/api/dashboard/stock-alerts", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
@@ -75,10 +74,9 @@ export function registerDashboardRoutes(app: Express): void {
       sinStock: alerts.filter((p) => p.stock === 0),
       stockBajo: alerts.filter((p) => p.stock > 0 && p.stock <= p.stockMinimo),
     });
-  });
+  }));
 
-  // ── Top products ──────────────────────────────────────────────────────────
-  app.get("/api/dashboard/top-products", isAuthenticated, async (req, res) => {
+  app.get("/api/dashboard/top-products", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
 
@@ -105,10 +103,9 @@ export function registerDashboardRoutes(app: Express): void {
         importe: r.importe ?? 0,
       }))
     );
-  });
+  }));
 
-  // ── Recent sales ──────────────────────────────────────────────────────────
-  app.get("/api/dashboard/recent-sales", isAuthenticated, async (req, res) => {
+  app.get("/api/dashboard/recent-sales", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
 
@@ -135,10 +132,9 @@ export function registerDashboardRoutes(app: Express): void {
         cantidad_productos: s.cantidad_productos ?? 0,
       }))
     );
-  });
+  }));
 
-  // ── Sales by day (last 7 days) ────────────────────────────────────────────
-  app.get("/api/dashboard/sales-by-day", isAuthenticated, async (req, res) => {
+  app.get("/api/dashboard/sales-by-day", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const since = daysAgo(6);
@@ -160,10 +156,9 @@ export function registerDashboardRoutes(app: Express): void {
       map.set(key, (map.get(key) ?? 0) + Number(s.total));
     }
     res.json(Array.from(map.entries()).map(([fecha, total]) => ({ fecha, total })));
-  });
+  }));
 
-  // ── All dashboard data in a single round-trip ─────────────────────────────
-  app.get("/api/dashboard/all", isAuthenticated, async (req, res) => {
+  app.get("/api/dashboard/all", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const { start, end } = todayRange();
@@ -266,5 +261,5 @@ export function registerDashboardRoutes(app: Express): void {
       })),
       salesByDay: Array.from(dayMap.entries()).map(([fecha, total]) => ({ fecha, total })),
     });
-  });
+  }));
 }

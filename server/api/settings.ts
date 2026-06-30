@@ -4,20 +4,21 @@ import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { broadcast } from "../lib/events";
+import { wrapAsync } from "../lib/asyncHandler";
 import { businessSettings } from "@shared/schema";
 import { normalizeBusinessSettingsResponse } from "../lib/normalizers/businessSettings";
 
 export function registerSettingsRoutes(app: Express): void {
-  app.get("/api/settings", isAuthenticated, async (req, res) => {
+  app.get("/api/settings", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     const [row] = await db
       .select()
       .from(businessSettings)
       .where(eq(businessSettings.ownerId, userId));
     res.json(row ? normalizeBusinessSettingsResponse(row) : null);
-  });
+  }));
 
-  app.put("/api/settings", isAuthenticated, async (req, res) => {
+  app.put("/api/settings", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     const body = req.body;
 
@@ -76,10 +77,9 @@ export function registerSettingsRoutes(app: Express): void {
       })
       .returning();
 
+    res.json(normalizeBusinessSettingsResponse(row));
     if (tenantId) {
       broadcast(tenantId, { type: "invalidate", entities: ["business_settings"] });
     }
-
-    res.json(normalizeBusinessSettingsResponse(row));
-  });
+  }));
 }

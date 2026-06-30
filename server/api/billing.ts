@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
+import { wrapAsync } from "../lib/asyncHandler";
 import { businessSettings, licenses } from "@shared/schema";
 import { getBillingStatus } from "@shared/billing";
 
@@ -13,7 +14,7 @@ function cycleEnd(from: Date): Date {
 }
 
 export function registerBillingRoutes(app: Express): void {
-  app.get("/api/billing/status", isAuthenticated, async (req, res) => {
+  app.get("/api/billing/status", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
 
     const [bs] = await db
@@ -44,9 +45,9 @@ export function registerBillingRoutes(app: Express): void {
       billingCycleEnd: bs.billingCycleEnd,
       lastPaymentDate: bs.lastPaymentDate,
     });
-  });
+  }));
 
-  app.post("/api/billing/payment", isAuthenticated, async (req, res) => {
+  app.post("/api/billing/payment", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     const now = new Date();
     const end = cycleEnd(now);
@@ -68,9 +69,9 @@ export function registerBillingRoutes(app: Express): void {
       .where(eq(licenses.ownerId, userId));
 
     res.json({ ok: true });
-  });
+  }));
 
-  app.post("/api/billing/suspend", isAuthenticated, async (req, res) => {
+  app.post("/api/billing/suspend", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     const now = new Date();
 
@@ -85,9 +86,9 @@ export function registerBillingRoutes(app: Express): void {
       .where(eq(licenses.ownerId, userId));
 
     res.json({ ok: true });
-  });
+  }));
 
-  app.post("/api/billing/reactivate", isAuthenticated, async (req, res) => {
+  app.post("/api/billing/reactivate", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     const now = new Date();
     const end = cycleEnd(now);
@@ -108,5 +109,5 @@ export function registerBillingRoutes(app: Express): void {
       .where(eq(licenses.ownerId, userId));
 
     res.json({ ok: true });
-  });
+  }));
 }

@@ -4,6 +4,7 @@ import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { broadcast } from "../lib/events";
+import { wrapAsync } from "../lib/asyncHandler";
 import {
   categories,
   products,
@@ -27,7 +28,7 @@ function parseIfUnmodifiedSince(req: any): Date | null {
 
 export function registerInventoryRoutes(app: Express): void {
   // ── Categories ────────────────────────────────────────────────────────────
-  app.get("/api/categories", isAuthenticated, async (req, res) => {
+  app.get("/api/categories", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
@@ -36,9 +37,9 @@ export function registerInventoryRoutes(app: Express): void {
       .where(eq(categories.tenantId, tenantId))
       .orderBy(categories.nombre);
     res.json(rows);
-  });
+  }));
 
-  app.post("/api/categories", isAuthenticated, async (req, res) => {
+  app.post("/api/categories", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const { nombre } = req.body;
@@ -47,11 +48,11 @@ export function registerInventoryRoutes(app: Express): void {
       .insert(categories)
       .values({ ownerId: userId, tenantId, nombre })
       .returning();
-    broadcast(tenantId, { type: "invalidate", entities: ["categories"] });
     res.json(row);
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["categories"] });
+  }));
 
-  app.put("/api/categories/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/categories/:id", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
@@ -74,23 +75,23 @@ export function registerInventoryRoutes(app: Express): void {
       .where(and(eq(categories.id, id), eq(categories.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
-    broadcast(tenantId, { type: "invalidate", entities: ["categories"] });
     res.json(row);
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["categories"] });
+  }));
 
-  app.delete("/api/categories/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/categories/:id", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     await db
       .delete(categories)
       .where(and(eq(categories.id, id), eq(categories.tenantId, tenantId)));
-    broadcast(tenantId, { type: "invalidate", entities: ["categories", "products"] });
     res.json({ ok: true });
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["categories", "products"] });
+  }));
 
   // ── Products ──────────────────────────────────────────────────────────────
-  app.get("/api/products", isAuthenticated, async (req, res) => {
+  app.get("/api/products", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
@@ -116,9 +117,9 @@ export function registerInventoryRoutes(app: Express): void {
       .where(eq(products.tenantId, tenantId))
       .orderBy(products.nombre);
     res.json(rows.map((r) => ({ ...r, categories: r.categoryNombre ? { nombre: r.categoryNombre } : null })));
-  });
+  }));
 
-  app.post("/api/products", isAuthenticated, async (req, res) => {
+  app.post("/api/products", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const body = req.body;
@@ -139,11 +140,11 @@ export function registerInventoryRoutes(app: Express): void {
         activo: body.activo ?? true,
       })
       .returning();
-    broadcast(tenantId, { type: "invalidate", entities: ["products"] });
     res.json(toProductResponse(row));
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["products"] });
+  }));
 
-  app.put("/api/products/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/products/:id", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
@@ -178,11 +179,11 @@ export function registerInventoryRoutes(app: Express): void {
       .where(and(eq(products.id, id), eq(products.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
-    broadcast(tenantId, { type: "invalidate", entities: ["products"] });
     res.json(toProductResponse(row));
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["products"] });
+  }));
 
-  app.delete("/api/products/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/products/:id", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
@@ -213,10 +214,10 @@ export function registerInventoryRoutes(app: Express): void {
         message: "Error interno al eliminar el producto.",
       });
     }
-  });
+  }));
 
   // ── Customers ─────────────────────────────────────────────────────────────
-  app.get("/api/customers", isAuthenticated, async (req, res) => {
+  app.get("/api/customers", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
@@ -225,9 +226,9 @@ export function registerInventoryRoutes(app: Express): void {
       .where(eq(customers.tenantId, tenantId))
       .orderBy(customers.nombre);
     res.json(rows);
-  });
+  }));
 
-  app.post("/api/customers", isAuthenticated, async (req, res) => {
+  app.post("/api/customers", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const body = req.body;
@@ -243,11 +244,11 @@ export function registerInventoryRoutes(app: Express): void {
         observaciones: body.observaciones ?? null,
       })
       .returning();
-    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
     res.json(row);
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
+  }));
 
-  app.put("/api/customers/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/customers/:id", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
@@ -277,23 +278,23 @@ export function registerInventoryRoutes(app: Express): void {
       .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
-    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
     res.json(row);
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
+  }));
 
-  app.delete("/api/customers/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/customers/:id", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
     await db
       .delete(customers)
       .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)));
-    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
     res.json({ ok: true });
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["customers"] });
+  }));
 
   // ── Sales ─────────────────────────────────────────────────────────────────
-  app.get("/api/sales", isAuthenticated, async (req, res) => {
+  app.get("/api/sales", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
@@ -302,9 +303,9 @@ export function registerInventoryRoutes(app: Express): void {
       .where(eq(sales.tenantId, tenantId))
       .orderBy(desc(sales.createdAt));
     res.json(rows);
-  });
+  }));
 
-  app.get("/api/sales/:id", isAuthenticated, async (req, res) => {
+  app.get("/api/sales/:id", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
@@ -337,9 +338,9 @@ export function registerInventoryRoutes(app: Express): void {
         products: { nombre: i.productNombre ?? "", sku: i.productSku ?? null },
       })),
     });
-  });
+  }));
 
-  app.post("/api/sales", isAuthenticated, async (req, res) => {
+  app.post("/api/sales", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const { items, observacion, customer_id, client_id } = req.body;
@@ -471,17 +472,17 @@ export function registerInventoryRoutes(app: Express): void {
         return { id: newSale.id, receiptNumber };
       });
 
-      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements"] });
       res.json(result);
+      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements"] });
     } catch (err: any) {
       const status = (err as any).status === 400 ? 400 : 500;
       const message = err?.message ?? "Error al registrar la venta";
       res.status(status).json({ message });
     }
-  });
+  }));
 
   // ── Stock Movements ───────────────────────────────────────────────────────
-  app.get("/api/stock-movements", isAuthenticated, async (req, res) => {
+  app.get("/api/stock-movements", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const productId = (req as any).query.productId as string | undefined;
@@ -516,9 +517,9 @@ export function registerInventoryRoutes(app: Express): void {
         products: { nombre: r.productNombre ?? "", sku: r.productSku ?? null },
       }))
     );
-  });
+  }));
 
-  app.post("/api/stock-movements", isAuthenticated, async (req, res) => {
+  app.post("/api/stock-movements", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const { product_id, tipo, cantidad, observacion } = req.body;
@@ -545,9 +546,9 @@ export function registerInventoryRoutes(app: Express): void {
     const newStock = tipo === "entrada" ? prod.stock + cantidad : prod.stock - cantidad;
     await db.update(products).set({ stock: newStock, updatedAt: new Date() }).where(eq(products.id, product_id));
 
-    broadcast(tenantId, { type: "invalidate", entities: ["stock_movements", "products"] });
     res.json(mv);
-  });
+    broadcast(tenantId, { type: "invalidate", entities: ["stock_movements", "products"] });
+  }));
 }
 
 function toProductResponse(p: typeof products.$inferSelect) {

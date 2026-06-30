@@ -3,10 +3,11 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
+import { wrapAsync } from "../lib/asyncHandler";
 import { licenses } from "@shared/schema";
 
 export function registerLicenseRoutes(app: Express): void {
-  app.get("/api/license/status", isAuthenticated, async (req, res) => {
+  app.get("/api/license/status", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     const [lic] = await db.select().from(licenses).where(eq(licenses.ownerId, userId));
     res.json({
@@ -15,5 +16,5 @@ export function registerLicenseRoutes(app: Express): void {
       expiresAt: lic?.expiresAt ?? null,
       suspendedAt: lic?.suspendedAt ?? null,
     });
-  });
+  }));
 }
