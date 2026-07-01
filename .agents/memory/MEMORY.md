@@ -7,3 +7,4 @@
 - [Offline Debug Tool](offline-debug-tool.md) — /admin/offline-debug page (admin-only); logger.ts → localStorage mts_offline_logs (500 max); admin.tsx became layout + admin/index.tsx + admin/offline-debug.tsx child routes.
 - [Online Sync & Conflict Detection](online-sync-conflicts.md) — broadcasts fixed for DELETEs + stock-movements + settings; HTTP 409 conflict check via X-If-Unmodified-Since on all PUT endpoints; ConflictDialog component; customers got updatedAt column (db:push applied); ConflictError in src/lib/api/errors.ts.
 - [Import/Export Backup System](import-export-backup.md) — xlsx+jszip installed; server/api/backup.ts extended with 4 new endpoints; shared/importMapper.ts for reusable column alias logic; express.json limit raised to 20mb.
+- [Bun Dependency Quirks](bun-dependency-quirks.md) — jose must be v5 (not v6), es5-ext missing string/#/contains needs manual fix, @tanstack/router-plugin must match react-router version.
