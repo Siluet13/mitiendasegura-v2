@@ -1,11 +1,12 @@
 import type { Express, RequestHandler } from "express";
-import { eq, desc, count, sql } from "drizzle-orm";
+import { and, eq, desc, count, sql } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
-import { licenses, users, businessSettings, tenants, products, customers, sales } from "@shared/schema";
+import { licenses, users, businessSettings, tenants, products, customers, sales, adminLogs } from "@shared/schema";
 import type { LicenseStatus } from "@shared/schema";
 import { wrapAsync } from "../lib/asyncHandler";
 import { broadcast } from "../lib/events";
+import { logEvent } from "../lib/logger";
 
 const CYCLE_DAYS = 30;
 
@@ -232,6 +233,7 @@ export function registerAdminRoutes(app: Express): void {
     }
 
     await broadcastToTenant(ownerId, ["settings", "business_settings"]);
+    logEvent({ module: "admin", event: "LICENSE_STATUS_CHANGED", level: status === "suspendida" ? "warning" : "info", message: `Licencia actualizada a ${status}`, ownerId, userId: (req as any).user?.claims?.sub ?? null, details: { newStatus: status, notes: notes ?? null } });
 
     res.json(updated);
   }));
@@ -286,7 +288,45 @@ export function registerAdminRoutes(app: Express): void {
       });
 
     await broadcastToTenant(ownerId, ["settings", "business_settings"]);
+    logEvent({ module: "admin", event: "ADMIN_PAYMENT_REGISTERED", message: "Pago registrado por admin", ownerId, userId: (req as any).user?.claims?.sub ?? null, details: { cycleEnd: end.toISOString(), targetOwnerId: ownerId } });
 
     res.json({ ok: true });
+  }));
+
+  app.get("/api/admin/logs", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit ?? 100), 500);
+    const level = req.query.level as string | undefined;
+    const module = req.query.module as string | undefined;
+
+    const conditions: ReturnType<typeof eq>[] = [];
+    if (level) conditions.push(eq(adminLogs.level, level));
+    if (module) conditions.push(eq(adminLogs.module, module));
+
+    const rows = await db
+      .select()
+      .from(adminLogs)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(adminLogs.createdAt))
+      .limit(limit);
+
+    res.json(rows);
+  }));
+
+  app.get("/api/admin/logs/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
+    const ownerId = String(req.params.ownerId);
+    const limit = Math.min(Number(req.query.limit ?? 100), 500);
+    const level = req.query.level as string | undefined;
+
+    const conditions: ReturnType<typeof eq>[] = [eq(adminLogs.ownerId, ownerId)];
+    if (level) conditions.push(eq(adminLogs.level, level));
+
+    const rows = await db
+      .select()
+      .from(adminLogs)
+      .where(and(...conditions))
+      .orderBy(desc(adminLogs.createdAt))
+      .limit(limit);
+
+    res.json(rows);
   }));
 }

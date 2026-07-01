@@ -5,6 +5,7 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { wrapAsync } from "../lib/asyncHandler";
 import { broadcast } from "../lib/events";
+import { logEvent } from "../lib/logger";
 import { cashRegisterSessions, sales } from "@shared/schema";
 
 async function calcCurrentTotal(sessionId: string): Promise<number> {
@@ -75,6 +76,7 @@ export function registerCashRoutes(app: Express): void {
       .returning();
 
     broadcast(tenantId, { type: "invalidate", entities: ["cash_session"] });
+    logEvent({ module: "cash", event: "CASH_OPENED", message: "Caja abierta", userId, ownerId: userId, tenantId, details: { sessionId: session.id, initialAmount } });
     res.json(toResponse(session, 0));
   }));
 
@@ -108,6 +110,7 @@ export function registerCashRoutes(app: Express): void {
       .returning();
 
     broadcast(tenantId, { type: "invalidate", entities: ["cash_session"] });
+    logEvent({ module: "cash", event: "CASH_CLOSED", message: "Caja cerrada", userId, ownerId: userId, tenantId, details: { sessionId: session.id, totalSales, finalAmount: Number(session.initialAmount) + totalSales } });
     res.json(toResponse(closed, totalSales));
   }));
 }

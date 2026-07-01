@@ -6,6 +6,7 @@ import { requireTenant } from "../lib/context";
 import { wrapAsync } from "../lib/asyncHandler";
 import { businessSettings, licenses } from "@shared/schema";
 import { getBillingStatus } from "@shared/billing";
+import { logEvent } from "../lib/logger";
 
 const CYCLE_DAYS = 30;
 
@@ -68,6 +69,7 @@ export function registerBillingRoutes(app: Express): void {
       .set({ status: "activa", activatedAt: now, updatedAt: now })
       .where(eq(licenses.ownerId, userId));
 
+    logEvent({ module: "billing", event: "PAYMENT_REGISTERED", message: "Pago registrado", userId, ownerId: userId, details: { cycleEnd: end.toISOString() } });
     res.json({ ok: true });
   }));
 
@@ -85,6 +87,7 @@ export function registerBillingRoutes(app: Express): void {
       .set({ status: "suspendida", suspendedAt: now, updatedAt: now })
       .where(eq(licenses.ownerId, userId));
 
+    logEvent({ module: "billing", event: "SUBSCRIPTION_SUSPENDED", level: "warning", message: "Suscripción suspendida", userId, ownerId: userId });
     res.json({ ok: true });
   }));
 
@@ -108,6 +111,7 @@ export function registerBillingRoutes(app: Express): void {
       .set({ status: "activa", activatedAt: now, updatedAt: now })
       .where(eq(licenses.ownerId, userId));
 
+    logEvent({ module: "billing", event: "SUBSCRIPTION_REACTIVATED", message: "Suscripción reactivada", userId, ownerId: userId });
     res.json({ ok: true });
   }));
 }

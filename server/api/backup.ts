@@ -15,6 +15,7 @@ import {
 } from "@shared/schema";
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
+import { logEvent } from "../lib/logger";
 
 const MAX_RESTORE_ROWS = 100_000;
 
@@ -89,6 +90,7 @@ export function registerBackupRoutes(app: Express): void {
     const date = new Date().toISOString().slice(0, 10);
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", `attachment; filename="backup_${date}.json"`);
+    logEvent({ module: "backup", event: "BACKUP_EXPORTED_JSON", message: "Backup JSON exportado", userId, ownerId: userId, tenantId, details: { ...payload.stats } });
     res.send(json);
   });
 
@@ -194,6 +196,7 @@ export function registerBackupRoutes(app: Express): void {
     const date = new Date().toISOString().slice(0, 10);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="backup_${date}.xlsx"`);
+    logEvent({ module: "backup", event: "BACKUP_EXPORTED_XLSX", message: "Backup XLSX exportado", userId, ownerId: userId, tenantId });
     res.send(buf);
   });
 
@@ -264,6 +267,7 @@ export function registerBackupRoutes(app: Express): void {
     const date = new Date().toISOString().slice(0, 10);
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="backup_csv_${date}.zip"`);
+    logEvent({ module: "backup", event: "BACKUP_EXPORTED_CSV", message: "Backup CSV exportado", userId, ownerId: userId, tenantId });
     res.send(buf);
   });
 
@@ -409,6 +413,7 @@ export function registerBackupRoutes(app: Express): void {
       results.customers = result;
     }
 
+    logEvent({ module: "backup", event: "BACKUP_IMPORTED", message: "Importación de datos realizada", userId, ownerId: userId, tenantId, details: { entities: Object.keys(results) } });
     res.json({ results });
   });
 
@@ -586,6 +591,7 @@ export function registerBackupRoutes(app: Express): void {
         }
       });
 
+      logEvent({ module: "backup", event: "BACKUP_RESTORED", message: "Backup restaurado completamente", userId, ownerId: userId, tenantId, details: body.stats ?? null });
       res.json({ ok: true, stats: body.stats });
     } catch (err: any) {
       console.error("Restore error:", err);

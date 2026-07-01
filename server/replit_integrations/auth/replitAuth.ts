@@ -6,6 +6,7 @@ import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
+import { logEvent } from "../../lib/logger";
 
 const getOidcConfig = memoize(
   async () => {
@@ -71,6 +72,8 @@ export async function setupAuth(app: Express) {
     const user = {};
     updateUserSession(user, tokens);
     await upsertUser(tokens.claims());
+    const sub = String((tokens.claims() as any)?.sub ?? "");
+    logEvent({ module: "auth", event: "LOGIN_SUCCESS", message: "Login exitoso", userId: sub, ownerId: sub });
     verified(null, user);
   };
 
