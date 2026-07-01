@@ -21,7 +21,7 @@ function swVersionPlugin() {
 
 export default defineConfig({
   plugins: [
-    tsconfigPaths(),
+    tsconfigPaths({ projects: ["./tsconfig.json"] }),
     tailwindcss(),
     tanstackStart({
       server: { entry: "src/server.ts" },
@@ -40,7 +40,7 @@ export default defineConfig({
       },
     },
     watch: {
-      ignored: ["**/node_modules/**", "**/.cache/**", "**/dist/**"],
+      ignored: ["**/node_modules/**", "**/.cache/**", "**/dist/**", "**/.local/**"],
     },
   },
 });
