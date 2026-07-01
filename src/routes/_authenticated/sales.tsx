@@ -62,17 +62,17 @@ const fmt = (n: number) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(n);
 
 // ── Cash Register Bar ──────────────────────────────────────────────────────────
-function CashRegisterBar() {
+function CashRegisterBar({
+  session,
+  isLoading,
+}: {
+  session: CashSession | null;
+  isLoading: boolean;
+}) {
   const qc = useQueryClient();
   const [openModal, setOpenModal] = useState(false);
   const [closeModal, setCloseModal] = useState(false);
   const [initialAmount, setInitialAmount] = useState("0");
-
-  const { data: session, isLoading } = useQuery<CashSession | null>({
-    queryKey: ["cash_session"],
-    queryFn: getCashSession,
-    refetchInterval: 30_000,
-  });
 
   const openMut = useMutation({
     mutationFn: () => openCash(Math.max(0, parseFloat(initialAmount || "0"))),
@@ -226,6 +226,14 @@ function SalesPage() {
     skipAutoActions: boolean;
   } | null>(null);
 
+  const { data: cashSession, isLoading: cashLoading } = useQuery<CashSession | null>({
+    queryKey: ["cash_session"],
+    queryFn: getCashSession,
+    refetchInterval: 30_000,
+  });
+
+  const cashIsOpen = cashSession?.status === "open";
+
   const { data: sales = [], isLoading } = useQuery({ queryKey: ["sales"], queryFn: listSales });
   const { data: products = [] } = useQuery({ queryKey: ["products"], queryFn: listProducts });
   const { data: customers = [] } = useQuery({
@@ -244,21 +252,26 @@ function SalesPage() {
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (open || detailId) return;
-      if (e.key === "F5") {
+      if (e.key === "F5" && cashIsOpen) {
         e.preventDefault();
         setOpen(true);
       }
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [open, detailId]);
+  }, [open, detailId, cashIsOpen]);
 
   return (
     <div className="space-y-4">
-      <CashRegisterBar />
+      <CashRegisterBar session={cashSession ?? null} isLoading={cashLoading} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Ventas</h1>
-        <Button onClick={() => setOpen(true)} className="gap-2">
+        <Button
+          onClick={() => setOpen(true)}
+          className="gap-2"
+          disabled={!cashIsOpen}
+          title={!cashIsOpen ? "Abrí la caja para registrar ventas" : undefined}
+        >
           <Plus className="h-4 w-4" /> Nueva venta
           <Kbd>F5</Kbd>
         </Button>
@@ -351,6 +364,7 @@ function SalesPage() {
           qc.invalidateQueries({ queryKey: ["sales"] });
           qc.invalidateQueries({ queryKey: ["products"] });
           qc.invalidateQueries({ queryKey: ["stock_movements"] });
+          qc.invalidateQueries({ queryKey: ["cash_session"] });
         }}
         onSaleCompleted={(saleId, receiptNumber, cid) => {
           setPendingReceipt({ saleId, receiptNumber, customerId: cid, skipAutoActions: false });

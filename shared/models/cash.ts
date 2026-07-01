@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, numeric, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { index, numeric, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 
 export const cashRegisterSessions = pgTable("cash_register_sessions", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -13,6 +13,7 @@ export const cashRegisterSessions = pgTable("cash_register_sessions", {
   status: text("status").notNull().default("open"),
 }, (t) => [
   index("cash_register_sessions_tenant_id_idx").on(t.tenantId),
+  uniqueIndex("cash_sessions_one_open_per_user").on(t.tenantId, t.userId).where(sql`status = 'open'`),
 ]);
 
 export type CashRegisterSession = typeof cashRegisterSessions.$inferSelect;

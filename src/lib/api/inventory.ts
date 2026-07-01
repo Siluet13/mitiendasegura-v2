@@ -53,6 +53,7 @@ export type Sale = {
   receiptNumber: string | null;
   total: string | number;
   observacion: string | null;
+  cashSessionId: string | null;
   createdAt: string;
 };
 

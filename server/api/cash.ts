@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { and, eq, gte, sum } from "drizzle-orm";
+import { and, eq, sum } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
@@ -7,11 +7,11 @@ import { wrapAsync } from "../lib/asyncHandler";
 import { broadcast } from "../lib/events";
 import { cashRegisterSessions, sales } from "@shared/schema";
 
-async function calcCurrentTotal(tenantId: string, userId: string, openedAt: Date): Promise<number> {
+async function calcCurrentTotal(sessionId: string): Promise<number> {
   const [agg] = await db
     .select({ total: sum(sales.total) })
     .from(sales)
-    .where(and(eq(sales.tenantId, tenantId), eq(sales.userId, userId), gte(sales.createdAt, openedAt)));
+    .where(eq(sales.cashSessionId, sessionId));
   return agg?.total ? Number(agg.total) : 0;
 }
 
@@ -47,7 +47,7 @@ export function registerCashRoutes(app: Express): void {
 
     if (!session) return res.json(null);
 
-    const currentTotal = await calcCurrentTotal(tenantId, userId, session.openedAt);
+    const currentTotal = await calcCurrentTotal(session.id);
     res.json(toResponse(session, currentTotal));
   }));
 
@@ -94,7 +94,7 @@ export function registerCashRoutes(app: Express): void {
 
     if (!session) return res.status(404).json({ message: "No hay caja abierta" });
 
-    const totalSales = await calcCurrentTotal(tenantId, userId, session.openedAt);
+    const totalSales = await calcCurrentTotal(session.id);
 
     const [closed] = await db
       .update(cashRegisterSessions)
