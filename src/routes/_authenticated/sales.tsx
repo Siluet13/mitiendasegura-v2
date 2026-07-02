@@ -5,13 +5,15 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Trash2, Eye, User, WifiOff, Printer, Wallet, LockOpen, Lock } from "lucide-react";
+import { Plus, Trash2, Eye, User, WifiOff, Printer, Wallet, LockOpen, Lock, Pencil, Ban } from "lucide-react";
 import {
   createSale,
   getSaleWithItems,
   listCustomers,
   listProducts,
   listSales,
+  updateSale,
+  voidSale,
   type Customer,
   type Product,
   type SaleItemInput,
@@ -219,6 +221,8 @@ function SalesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [voidId, setVoidId] = useState<string | null>(null);
   const [pendingReceipt, setPendingReceipt] = useState<{
     saleId: string;
     receiptNumber: string | null;
@@ -319,8 +323,15 @@ function SalesPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
-                      {fmt(Number(s.total))}
+                    <TableCell className="text-right">
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="tabular-nums font-medium">{fmt(Number(s.total))}</span>
+                        {s.status === "void" && (
+                          <span className="text-[10px] font-semibold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded leading-none">
+                            ANULADA
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="max-w-[20rem] truncate text-sm text-muted-foreground">
                       {s.observacion ?? "—"}
@@ -345,6 +356,29 @@ function SalesPage() {
                         <Button size="icon" variant="ghost" onClick={() => setDetailId(s.id)}>
                           <Eye className="h-4 w-4" />
                         </Button>
+                        {s.status !== "void" && (
+                          <>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              title={!cashIsOpen ? "Abrí la caja para editar ventas" : "Editar venta"}
+                              disabled={!cashIsOpen}
+                              onClick={() => setEditId(s.id)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              title={!cashIsOpen ? "Abrí la caja para anular ventas" : "Anular venta"}
+                              disabled={!cashIsOpen}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => setVoidId(s.id)}
+                            >
+                              <Ban className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -383,6 +417,32 @@ function SalesPage() {
         }
         skipAutoActions={pendingReceipt?.skipAutoActions ?? false}
         onClose={() => setPendingReceipt(null)}
+      />
+
+      <EditSaleDialog
+        saleId={editId}
+        products={products}
+        customers={customers}
+        onClose={() => setEditId(null)}
+        onSaved={() => {
+          qc.invalidateQueries({ queryKey: ["sales"] });
+          qc.invalidateQueries({ queryKey: ["products"] });
+          qc.invalidateQueries({ queryKey: ["stock_movements"] });
+          qc.invalidateQueries({ queryKey: ["cash_session"] });
+          qc.invalidateQueries({ queryKey: ["dashboard"] });
+        }}
+      />
+
+      <VoidConfirmDialog
+        saleId={voidId}
+        onClose={() => setVoidId(null)}
+        onVoided={() => {
+          qc.invalidateQueries({ queryKey: ["sales"] });
+          qc.invalidateQueries({ queryKey: ["products"] });
+          qc.invalidateQueries({ queryKey: ["stock_movements"] });
+          qc.invalidateQueries({ queryKey: ["cash_session"] });
+          qc.invalidateQueries({ queryKey: ["dashboard"] });
+        }}
       />
     </div>
   );
@@ -930,6 +990,400 @@ function SaleDetailDialog({
             )}
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Edit sale dialog ───────────────────────────────────────────────────────────
+function EditSaleDialog({
+  saleId,
+  products,
+  customers,
+  onClose,
+  onSaved,
+}: {
+  saleId: string | null;
+  products: Product[];
+  customers: Customer[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const qc = useQueryClient();
+  const [lines, setLines] = useState<Line[]>([]);
+  const [pid, setPid] = useState("");
+  const [qty, setQty] = useState(1);
+  const [customerId, setCustomerId] = useState(NO_CUSTOMER);
+  const [lastScanned, setLastScanned] = useState<{ product: Product; timestamp: number } | null>(null);
+  const scannerRef = useRef<PosScannerInputHandle>(null);
+  const customerTriggerRef = useRef<HTMLButtonElement>(null);
+  const submitBtnRef = useRef<HTMLButtonElement>(null);
+
+  const form = useForm<{ observacion?: string }>({
+    resolver: zodResolver(z.object({ observacion: obsSchema })),
+    defaultValues: { observacion: "" },
+  });
+
+  const { data: saleData, isLoading: saleLoading } = useQuery({
+    queryKey: ["sales", saleId],
+    queryFn: () => (saleId ? getSaleWithItems(saleId) : Promise.resolve(null)),
+    enabled: !!saleId,
+  });
+
+  useEffect(() => {
+    if (!saleData) return;
+    setLines(saleData.sale_items.map((i) => ({ product_id: i.productId, cantidad: i.cantidad })));
+    setCustomerId(saleData.customerId ?? NO_CUSTOMER);
+    form.reset({ observacion: saleData.observacion ?? "" });
+  }, [saleData, form]);
+
+  const productMap = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products) m.set(p.id, p);
+    return m;
+  }, [products]);
+
+  const available = useMemo(
+    () => products.filter((p) => p.activo && !lines.some((l) => l.product_id === p.id)),
+    [products, lines],
+  );
+
+  const total = useMemo(
+    () =>
+      lines.reduce((acc, l) => {
+        const p = productMap.get(l.product_id);
+        return acc + (p ? Number(p.precio) * l.cantidad : 0);
+      }, 0),
+    [lines, productMap],
+  );
+
+  const lastScannedQty = lastScanned
+    ? (lines.find((l) => l.product_id === lastScanned.product.id)?.cantidad ?? 0)
+    : 0;
+  const lastScannedRemaining = lastScanned ? lastScanned.product.stock - lastScannedQty : 0;
+
+  useEffect(() => {
+    if (!saleId) return;
+    function handleKey(e: KeyboardEvent) {
+      if (
+        document.querySelector("[data-radix-select-content]") ||
+        document.querySelector("[data-radix-popper-content-wrapper]")
+      ) return;
+      switch (e.key) {
+        case "F2": e.preventDefault(); scannerRef.current?.focus(); break;
+        case "F4": e.preventDefault(); customerTriggerRef.current?.focus(); customerTriggerRef.current?.click(); break;
+        case "F8": e.preventDefault(); submitBtnRef.current?.click(); break;
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [saleId]);
+
+  function addLine() {
+    if (!pid) { toast.error("Seleccioná un producto"); return; }
+    if (qty <= 0 || !Number.isInteger(qty)) { toast.error("Cantidad inválida"); return; }
+    const p = productMap.get(pid);
+    if (!p) return;
+    if (qty > p.stock) { toast.error(`Stock insuficiente (disponible: ${p.stock})`); return; }
+    setLines((prev) => [...prev, { product_id: pid, cantidad: qty }]);
+    setPid("");
+    setQty(1);
+  }
+
+  const addByBarcode = useCallback((product: Product) => {
+    setLines((prev) => {
+      const existing = prev.find((l) => l.product_id === product.id);
+      if (existing) {
+        const newQty = existing.cantidad + 1;
+        if (newQty > product.stock) {
+          toast.error(`Stock insuficiente para "${product.nombre}" (disponible: ${product.stock})`);
+          return prev;
+        }
+        return prev.map((l) => l.product_id === product.id ? { ...l, cantidad: newQty } : l);
+      }
+      if (product.stock < 1) {
+        toast.error(`"${product.nombre}" no tiene stock disponible`);
+        return prev;
+      }
+      return [...prev, { product_id: product.id, cantidad: 1 }];
+    });
+    setLastScanned({ product, timestamp: Date.now() });
+  }, []);
+
+  function removeLine(id: string) {
+    setLines((prev) => prev.filter((l) => l.product_id !== id));
+  }
+
+  function handleClose() {
+    setLines([]);
+    setPid("");
+    setQty(1);
+    setCustomerId(NO_CUSTOMER);
+    setLastScanned(null);
+    form.reset({ observacion: "" });
+    onClose();
+  }
+
+  const mut = useMutation({
+    mutationFn: async (values: { observacion?: string }) => {
+      if (!saleId) throw new Error("No hay venta para editar");
+      if (lines.length === 0) throw new Error("La venta no puede estar vacía");
+      return updateSale(saleId, {
+        items: lines,
+        observacion: values.observacion?.trim() || null,
+        customer_id: customerId !== NO_CUSTOMER ? customerId : null,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Venta actualizada");
+      qc.invalidateQueries({ queryKey: ["sales"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["stock_movements"] });
+      qc.invalidateQueries({ queryKey: ["cash_session"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      handleClose();
+      onSaved();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Dialog open={!!saleId} onOpenChange={(v) => { if (!v) handleClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <DialogHeader className="shrink-0">
+          <DialogTitle className="flex items-center justify-between">
+            <span>Editar venta</span>
+            <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+              <Kbd>F2</Kbd> scanner
+              {customers.length > 0 && <><Kbd>F4</Kbd> cliente</>}
+              <Kbd>F8</Kbd> guardar
+              <Kbd>ESC</Kbd> cancelar
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+
+        {saleLoading ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Cargando venta…</p>
+        ) : (
+          <form
+            onSubmit={form.handleSubmit(async (v) => {
+              try {
+                await mut.mutateAsync(v);
+              } catch {
+                // handled in onError
+              }
+            })}
+            className="flex flex-col gap-4 overflow-y-auto pr-1"
+          >
+            <PosScannerInput ref={scannerRef} products={products} onProductFound={addByBarcode} isActive={!!saleId} />
+
+            {lastScanned && lastScannedQty > 0 && (
+              <LastScannedPanel
+                key={lastScanned.timestamp}
+                product={lastScanned.product}
+                currentQty={lastScannedQty}
+                remainingStock={lastScannedRemaining}
+              />
+            )}
+
+            {customers.length > 0 && (
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1.5">
+                  <User className="h-3.5 w-3.5 text-muted-foreground" />
+                  Cliente (opcional) <Kbd>F4</Kbd>
+                </Label>
+                <Select value={customerId} onValueChange={setCustomerId}>
+                  <SelectTrigger ref={customerTriggerRef}>
+                    <SelectValue placeholder="Sin cliente" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_CUSTOMER}>Sin cliente</SelectItem>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.nombre}
+                        {c.telefono && (
+                          <span className="text-xs text-muted-foreground"> · {c.telefono}</span>
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="grid gap-2 sm:grid-cols-[1fr_120px_auto]">
+              <div className="space-y-1">
+                <Label>Producto</Label>
+                <Select value={pid || undefined} onValueChange={setPid}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar producto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {available.length === 0 ? (
+                      <div className="px-2 py-1 text-sm text-muted-foreground">Sin productos disponibles</div>
+                    ) : (
+                      available.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.nombre}{" "}
+                          <span className="text-xs text-muted-foreground">
+                            · {fmt(Number(p.precio))} · stock {p.stock}
+                          </span>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-qty">Cantidad</Label>
+                <Input
+                  id="edit-qty"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={qty}
+                  onChange={(e) => setQty(parseInt(e.target.value || "0", 10))}
+                />
+              </div>
+              <div className="flex items-end">
+                <Button type="button" onClick={addLine} className="w-full sm:w-auto">
+                  Agregar
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-md border overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="text-right">Precio</TableHead>
+                    <TableHead className="text-right">Cant.</TableHead>
+                    <TableHead className="text-right">Subtotal</TableHead>
+                    <TableHead className="w-10" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lines.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
+                        Sin productos
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    lines.map((l) => {
+                      const p = productMap.get(l.product_id);
+                      const precio = p ? Number(p.precio) : 0;
+                      return (
+                        <TableRow key={l.product_id}>
+                          <TableCell className="font-medium">{p?.nombre ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{fmt(precio)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{l.cantidad}</TableCell>
+                          <TableCell className="text-right tabular-nums font-medium">
+                            {fmt(precio * l.cantidad)}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => removeLine(l.product_id)}
+                              aria-label={`Quitar ${p?.nombre ?? "producto"}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border-2 border-primary/25 bg-primary/5 px-4 py-3">
+              <span className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                Total estimado
+              </span>
+              <span
+                className={[
+                  "tabular-nums font-bold tracking-tight transition-all",
+                  lines.length > 0 ? "text-2xl text-primary" : "text-base text-muted-foreground",
+                ].join(" ")}
+              >
+                {fmt(total)}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-observacion">Observación</Label>
+              <Textarea id="edit-observacion" rows={2} {...form.register("observacion")} />
+            </div>
+
+            <DialogFooter className="shrink-0">
+              <Button type="button" variant="outline" onClick={handleClose}>
+                Cancelar <Kbd>ESC</Kbd>
+              </Button>
+              <Button
+                ref={submitBtnRef}
+                type="submit"
+                disabled={mut.isPending || lines.length === 0}
+                className="gap-2"
+              >
+                {mut.isPending ? "Guardando…" : "Guardar cambios"}
+                {!mut.isPending && <Kbd>F8</Kbd>}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Void confirm dialog ────────────────────────────────────────────────────────
+function VoidConfirmDialog({
+  saleId,
+  onClose,
+  onVoided,
+}: {
+  saleId: string | null;
+  onClose: () => void;
+  onVoided: () => void;
+}) {
+  const mut = useMutation({
+    mutationFn: () => {
+      if (!saleId) throw new Error("No hay venta");
+      return voidSale(saleId);
+    },
+    onSuccess: () => {
+      toast.success("Venta anulada");
+      onVoided();
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Dialog open={!!saleId} onOpenChange={(v) => { if (!v && !mut.isPending) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Ban className="h-4 w-4 text-destructive" /> Anular venta
+          </DialogTitle>
+        </DialogHeader>
+        <div className="py-2 text-sm text-muted-foreground space-y-1.5">
+          <p>¿Confirmás la anulación de esta venta?</p>
+          <p>El stock de los productos involucrados se devolverá automáticamente.</p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
+            Cancelar
+          </Button>
+          <Button variant="destructive" onClick={() => mut.mutate()} disabled={mut.isPending}>
+            {mut.isPending ? "Anulando…" : "Anular venta"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

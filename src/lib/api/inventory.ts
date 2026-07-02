@@ -54,6 +54,7 @@ export type Sale = {
   total: string | number;
   observacion: string | null;
   cashSessionId: string | null;
+  status: string;
   createdAt: string;
 };
 
@@ -224,6 +225,24 @@ export async function createSale(input: {
       client_id: input.client_id ?? null,
     }),
     timeoutMs: 3000,
+  });
+}
+
+export async function updateSale(
+  id: string,
+  input: { items: SaleItemInput[]; observacion?: string | null; customer_id?: string | null }
+) {
+  return apiFetch<Sale>(`/api/sales/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+    timeoutMs: 8000,
+  });
+}
+
+export async function voidSale(id: string) {
+  return apiFetch<{ ok: boolean }>(`/api/sales/${id}`, {
+    method: "DELETE",
+    timeoutMs: 8000,
   });
 }
 
