@@ -9,3 +9,5 @@
 - [Import/Export Backup System](import-export-backup.md) — xlsx+jszip installed; server/api/backup.ts extended with 4 new endpoints; shared/importMapper.ts for reusable column alias logic; express.json limit raised to 20mb.
 - [Billing System Complete](billing-system.md) — BusinessDetailSheet + PUT /api/admin/businesses/:ownerId + SSE broadcasts on all admin mutations; subscriptionStatus kept in sync with licenseStatus on all state changes.
 - [Logging Infrastructure Phase 1](logging-phase1.md) — adminLogs DB table + server/lib/logger.ts (logEvent fire-and-forget) + POST /api/log/event (pre-checkLicense) + frontend logSyncEvent; events wired in auth/billing/cash/backup/admin/sync; GET /api/admin/logs endpoints for reads.
+- [Billing UPSERT Pattern](billing-upsert-pattern.md) — todos los endpoints de billing deben usar UPSERT; business_settings y licenses pueden no tener fila → UPDATE puro causa silent failure.
+- [Billing Query Keys](billing-query-keys.md) — useBilling y settings.tsx deben usar queryKey ["business_settings"]; /api/license/status usa ["/api/license/status"].

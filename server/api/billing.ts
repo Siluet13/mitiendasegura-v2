@@ -54,20 +54,33 @@ export function registerBillingRoutes(app: Express): void {
     const end = cycleEnd(now);
 
     await db
-      .update(businessSettings)
-      .set({
+      .insert(businessSettings)
+      .values({
+        ownerId: userId,
+        nombreNegocio: "",
         lastPaymentDate: now,
         billingCycleStart: now,
         billingCycleEnd: end,
         subscriptionStatus: "active",
-        updatedAt: now,
       })
-      .where(eq(businessSettings.ownerId, userId));
+      .onConflictDoUpdate({
+        target: businessSettings.ownerId,
+        set: {
+          lastPaymentDate: now,
+          billingCycleStart: now,
+          billingCycleEnd: end,
+          subscriptionStatus: "active",
+          updatedAt: now,
+        },
+      });
 
     await db
-      .update(licenses)
-      .set({ status: "activa", activatedAt: now, updatedAt: now })
-      .where(eq(licenses.ownerId, userId));
+      .insert(licenses)
+      .values({ ownerId: userId, status: "activa", activatedAt: now })
+      .onConflictDoUpdate({
+        target: licenses.ownerId,
+        set: { status: "activa", activatedAt: now, updatedAt: now },
+      });
 
     logEvent({ module: "billing", event: "PAYMENT_REGISTERED", message: "Pago registrado", userId, ownerId: userId, details: { cycleEnd: end.toISOString() } });
     res.json({ ok: true });
@@ -78,14 +91,20 @@ export function registerBillingRoutes(app: Express): void {
     const now = new Date();
 
     await db
-      .update(businessSettings)
-      .set({ subscriptionStatus: "suspended", updatedAt: now })
-      .where(eq(businessSettings.ownerId, userId));
+      .insert(businessSettings)
+      .values({ ownerId: userId, nombreNegocio: "", subscriptionStatus: "suspended" })
+      .onConflictDoUpdate({
+        target: businessSettings.ownerId,
+        set: { subscriptionStatus: "suspended", updatedAt: now },
+      });
 
     await db
-      .update(licenses)
-      .set({ status: "suspendida", suspendedAt: now, updatedAt: now })
-      .where(eq(licenses.ownerId, userId));
+      .insert(licenses)
+      .values({ ownerId: userId, status: "suspendida", suspendedAt: now })
+      .onConflictDoUpdate({
+        target: licenses.ownerId,
+        set: { status: "suspendida", suspendedAt: now, updatedAt: now },
+      });
 
     logEvent({ module: "billing", event: "SUBSCRIPTION_SUSPENDED", level: "warning", message: "Suscripción suspendida", userId, ownerId: userId });
     res.json({ ok: true });
@@ -97,19 +116,31 @@ export function registerBillingRoutes(app: Express): void {
     const end = cycleEnd(now);
 
     await db
-      .update(businessSettings)
-      .set({
+      .insert(businessSettings)
+      .values({
+        ownerId: userId,
+        nombreNegocio: "",
         subscriptionStatus: "active",
         billingCycleStart: now,
         billingCycleEnd: end,
-        updatedAt: now,
       })
-      .where(eq(businessSettings.ownerId, userId));
+      .onConflictDoUpdate({
+        target: businessSettings.ownerId,
+        set: {
+          subscriptionStatus: "active",
+          billingCycleStart: now,
+          billingCycleEnd: end,
+          updatedAt: now,
+        },
+      });
 
     await db
-      .update(licenses)
-      .set({ status: "activa", activatedAt: now, updatedAt: now })
-      .where(eq(licenses.ownerId, userId));
+      .insert(licenses)
+      .values({ ownerId: userId, status: "activa", activatedAt: now })
+      .onConflictDoUpdate({
+        target: licenses.ownerId,
+        set: { status: "activa", activatedAt: now, updatedAt: now },
+      });
 
     logEvent({ module: "billing", event: "SUBSCRIPTION_REACTIVATED", message: "Suscripción reactivada", userId, ownerId: userId });
     res.json({ ok: true });

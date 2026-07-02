@@ -169,9 +169,12 @@ export function registerAdminRoutes(app: Express): void {
 
     if (Object.keys(settingsFields).length > 1) {
       await db
-        .update(businessSettings)
-        .set(settingsFields as any)
-        .where(eq(businessSettings.ownerId, ownerId));
+        .insert(businessSettings)
+        .values({ ownerId, nombreNegocio: "", ...settingsFields })
+        .onConflictDoUpdate({
+          target: businessSettings.ownerId,
+          set: settingsFields as any,
+        });
     }
 
     if (billingCycleEnd !== undefined && billingCycleEnd !== null) {
@@ -220,16 +223,15 @@ export function registerAdminRoutes(app: Express): void {
       .onConflictDoUpdate({ target: licenses.ownerId, set: setFields })
       .returning();
 
-    if (status === "suspendida") {
+    if (status === "suspendida" || status === "activa") {
+      const subStatus = status === "suspendida" ? "suspended" : "active";
       await db
-        .update(businessSettings)
-        .set({ subscriptionStatus: "suspended", updatedAt: now })
-        .where(eq(businessSettings.ownerId, ownerId));
-    } else if (status === "activa") {
-      await db
-        .update(businessSettings)
-        .set({ subscriptionStatus: "active", updatedAt: now })
-        .where(eq(businessSettings.ownerId, ownerId));
+        .insert(businessSettings)
+        .values({ ownerId, nombreNegocio: "", subscriptionStatus: subStatus })
+        .onConflictDoUpdate({
+          target: businessSettings.ownerId,
+          set: { subscriptionStatus: subStatus, updatedAt: now },
+        });
     }
 
     await broadcastToTenant(ownerId, ["settings", "business_settings"]);
@@ -264,19 +266,29 @@ export function registerAdminRoutes(app: Express): void {
     const end = new Date(now.getTime() + CYCLE_DAYS * 24 * 60 * 60 * 1000);
 
     await db
-      .update(businessSettings)
-      .set({
+      .insert(businessSettings)
+      .values({
+        ownerId,
+        nombreNegocio: "",
         lastPaymentDate: now,
         billingCycleStart: now,
         billingCycleEnd: end,
         subscriptionStatus: "active",
-        updatedAt: now,
       })
-      .where(eq(businessSettings.ownerId, ownerId));
+      .onConflictDoUpdate({
+        target: businessSettings.ownerId,
+        set: {
+          lastPaymentDate: now,
+          billingCycleStart: now,
+          billingCycleEnd: end,
+          subscriptionStatus: "active",
+          updatedAt: now,
+        },
+      });
 
     await db
       .insert(licenses)
-      .values({ ownerId, status: "activa" })
+      .values({ ownerId, status: "activa", activatedAt: now, expiresAt: end })
       .onConflictDoUpdate({
         target: licenses.ownerId,
         set: {

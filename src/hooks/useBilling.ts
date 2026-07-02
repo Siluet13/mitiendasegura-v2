@@ -5,7 +5,7 @@ import { normalizeBusinessSettings } from "@/lib/normalizers/businessSettings";
 
 export function useBilling(): { billing: BillingStatus | null } {
   const { data } = useQuery({
-    queryKey: ["settings"],
+    queryKey: ["business_settings"],
     queryFn: getBusinessSettings,
     staleTime: 1000 * 60 * 5,
     retry: false,
