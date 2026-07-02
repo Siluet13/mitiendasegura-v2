@@ -31,6 +31,17 @@ function toResponse(session: typeof cashRegisterSessions.$inferSelect, currentTo
   };
 }
 
+function logCashError(endpoint: string, label: string, err: any): void {
+  console.error(
+    `[cash] ${endpoint} — ERROR en ${label}:`,
+    "\n  err.message     :", err?.message,
+    "\n  err.code        :", err?.code,
+    "\n  err.cause.msg   :", err?.cause?.message,
+    "\n  err.cause.code  :", err?.cause?.code,
+    "\n  err.stack       :", err?.stack,
+  );
+}
+
 export function registerCashRoutes(app: Express): void {
   app.get("/api/cash/current", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
@@ -50,7 +61,7 @@ export function registerCashRoutes(app: Express): void {
         .limit(1);
       console.log("[cash] GET /current — sesión:", session?.id ?? "ninguna");
     } catch (err: any) {
-      console.error("[cash] GET /current — ERROR en query sesión:", err?.message, err?.stack);
+      logCashError("GET /current", "select cashRegisterSessions", err);
       throw err;
     }
 
@@ -61,7 +72,7 @@ export function registerCashRoutes(app: Express): void {
       currentTotal = await calcCurrentTotal(session.id);
       console.log("[cash] GET /current — total calculado:", currentTotal);
     } catch (err: any) {
-      console.error("[cash] GET /current — ERROR en calcCurrentTotal:", err?.message, err?.stack);
+      logCashError("GET /current", "calcCurrentTotal", err);
       throw err;
     }
 
@@ -85,7 +96,7 @@ export function registerCashRoutes(app: Express): void {
         ))
         .limit(1);
     } catch (err: any) {
-      console.error("[cash] POST /open — ERROR en query existing:", err?.message, err?.stack);
+      logCashError("POST /open", "select existing session", err);
       throw err;
     }
 
@@ -101,7 +112,7 @@ export function registerCashRoutes(app: Express): void {
         .returning();
       console.log("[cash] POST /open — sesión creada:", session.id, "monto:", initialAmount);
     } catch (err: any) {
-      console.error("[cash] POST /open — ERROR en insert:", err?.message, err?.stack);
+      logCashError("POST /open", "insert cashRegisterSessions", err);
       throw err;
     }
 
@@ -128,7 +139,7 @@ export function registerCashRoutes(app: Express): void {
         .limit(1);
       console.log("[cash] POST /close — sesión encontrada:", session?.id ?? "ninguna");
     } catch (err: any) {
-      console.error("[cash] POST /close — ERROR en query sesión:", err?.message, err?.stack);
+      logCashError("POST /close", "select open session", err);
       throw err;
     }
 
@@ -139,7 +150,7 @@ export function registerCashRoutes(app: Express): void {
       totalSales = await calcCurrentTotal(session.id);
       console.log("[cash] POST /close — totalSales:", totalSales);
     } catch (err: any) {
-      console.error("[cash] POST /close — ERROR en calcCurrentTotal:", err?.message, err?.stack);
+      logCashError("POST /close", "calcCurrentTotal", err);
       throw err;
     }
 
@@ -157,7 +168,7 @@ export function registerCashRoutes(app: Express): void {
         .returning();
       console.log("[cash] POST /close — caja cerrada:", closed.id, "finalAmount:", closed.finalAmount);
     } catch (err: any) {
-      console.error("[cash] POST /close — ERROR en update:", err?.message, err?.stack);
+      logCashError("POST /close", "update cashRegisterSessions", err);
       throw err;
     }
 
