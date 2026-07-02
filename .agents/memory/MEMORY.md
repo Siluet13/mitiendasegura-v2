@@ -11,3 +11,4 @@
 - [Logging Infrastructure Phase 1](logging-phase1.md) — adminLogs DB table + server/lib/logger.ts (logEvent fire-and-forget) + POST /api/log/event (pre-checkLicense) + frontend logSyncEvent; events wired in auth/billing/cash/backup/admin/sync; GET /api/admin/logs endpoints for reads.
 - [Billing UPSERT Pattern](billing-upsert-pattern.md) — todos los endpoints de billing deben usar UPSERT; business_settings y licenses pueden no tener fila → UPDATE puro causa silent failure.
 - [Billing Query Keys](billing-query-keys.md) — useBilling y settings.tsx deben usar queryKey ["business_settings"]; /api/license/status usa ["/api/license/status"].
+- [Sale Edit & Void](sale-edit-void.md) — PUT+DELETE /api/sales/:id; columnas nuevas status/deletedAt/updatedAt; FOR UPDATE en sale; calcCurrentTotal filtra status='active'.

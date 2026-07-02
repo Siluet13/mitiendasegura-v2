@@ -341,6 +341,254 @@ export function registerInventoryRoutes(app: Express): void {
     });
   }));
 
+  app.put("/api/sales/:id", isAuthenticated, wrapAsync(async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
+    const { items, observacion, customer_id } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: "La venta no puede estar vacía" });
+    }
+
+    const seen = new Set<string>();
+    for (const item of items) {
+      const { product_id, cantidad } = item;
+      if (!product_id || !cantidad || cantidad <= 0 || !Number.isInteger(Number(cantidad))) {
+        return res.status(400).json({ message: "Item inválido" });
+      }
+      if (seen.has(product_id)) {
+        return res.status(400).json({ message: "Producto duplicado en la venta" });
+      }
+      seen.add(product_id);
+    }
+
+    try {
+      const updated = await db.transaction(async (tx) => {
+        // 1. Cargar venta con row-level lock para serializar ediciones concurrentes
+        const [sale] = await tx
+          .select()
+          .from(sales)
+          .where(and(eq(sales.id, id), eq(sales.tenantId, tenantId)))
+          .for("update");
+        if (!sale) throw Object.assign(new Error("Venta no encontrada"), { status: 404 });
+        if (sale.status === "void") {
+          throw Object.assign(new Error("No se puede editar una venta anulada"), { status: 400 });
+        }
+
+        // 2. Bloquear edición si la sesión de caja está cerrada
+        if (sale.cashSessionId) {
+          const [sess] = await tx
+            .select({ status: cashRegisterSessions.status })
+            .from(cashRegisterSessions)
+            .where(and(eq(cashRegisterSessions.id, sale.cashSessionId), eq(cashRegisterSessions.tenantId, tenantId)));
+          if (sess?.status === "closed") {
+            throw Object.assign(
+              new Error("No se puede editar una venta de una sesión de caja cerrada"),
+              { status: 400 }
+            );
+          }
+        }
+
+        // 3. Validar cliente si se envía
+        if (customer_id) {
+          const [cust] = await tx
+            .select({ id: customers.id })
+            .from(customers)
+            .where(and(eq(customers.id, customer_id), eq(customers.tenantId, tenantId)));
+          if (!cust) throw Object.assign(new Error("Cliente no encontrado"), { status: 400 });
+        }
+
+        // 4. Obtener items originales
+        const oldItems = await tx
+          .select()
+          .from(saleItems)
+          .where(eq(saleItems.saleId, id));
+
+        // 5. Revertir stock original + registrar movimientos de reversión
+        for (const oldItem of oldItems) {
+          const [prod] = await tx
+            .select()
+            .from(products)
+            .where(and(eq(products.id, oldItem.productId), eq(products.tenantId, tenantId)))
+            .for("update");
+          if (!prod) continue; // producto eliminado, omitir
+
+          await tx
+            .update(products)
+            .set({ stock: prod.stock + oldItem.cantidad, updatedAt: new Date() })
+            .where(and(eq(products.id, oldItem.productId), eq(products.tenantId, tenantId)));
+
+          await tx.insert(stockMovements).values({
+            ownerId: userId,
+            tenantId,
+            userId,
+            productId: oldItem.productId,
+            tipo: "entrada",
+            cantidad: oldItem.cantidad,
+            observacion: "Reversión por edición de venta",
+            referenciaTipo: "sale_edit",
+            referenciaId: id,
+          });
+        }
+
+        // 6. Eliminar items anteriores
+        await tx.delete(saleItems).where(eq(saleItems.saleId, id));
+
+        // 7. Insertar nuevos items y descontar stock
+        let total = 0;
+        for (const item of items) {
+          const { product_id, cantidad } = item;
+
+          const [prod] = await tx
+            .select()
+            .from(products)
+            .where(and(eq(products.id, product_id), eq(products.tenantId, tenantId)))
+            .for("update");
+
+          if (!prod) {
+            throw Object.assign(new Error(`Producto no encontrado: ${product_id}`), { status: 400 });
+          }
+          if (prod.stock < cantidad) {
+            throw Object.assign(
+              new Error(`Stock insuficiente para "${prod.nombre}" (disponible: ${prod.stock})`),
+              { status: 400 }
+            );
+          }
+
+          const precioUnitario = Number(prod.precio);
+          const subtotal = precioUnitario * cantidad;
+          total += subtotal;
+
+          await tx.insert(saleItems).values({
+            saleId: id,
+            productId: product_id,
+            cantidad,
+            precioUnitario: String(precioUnitario),
+            subtotal: String(subtotal),
+          });
+
+          await tx
+            .update(products)
+            .set({ stock: prod.stock - cantidad, updatedAt: new Date() })
+            .where(and(eq(products.id, product_id), eq(products.tenantId, tenantId)));
+
+          await tx.insert(stockMovements).values({
+            ownerId: userId,
+            tenantId,
+            userId,
+            productId: product_id,
+            tipo: "salida",
+            cantidad,
+            observacion: "Edición de venta",
+            referenciaTipo: "sale_edit",
+            referenciaId: id,
+          });
+        }
+
+        // 8. Actualizar venta (tenantId en WHERE garantiza aislamiento multi-tenant)
+        const [result] = await tx
+          .update(sales)
+          .set({
+            total: String(total),
+            observacion: observacion !== undefined ? (observacion ?? null) : sale.observacion,
+            customerId: customer_id !== undefined ? (customer_id ?? null) : sale.customerId,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(sales.id, id), eq(sales.tenantId, tenantId)))
+          .returning();
+
+        return result;
+      });
+
+      res.json(updated);
+      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements", "cash_session"] });
+    } catch (err: any) {
+      const status = err?.status === 404 ? 404 : err?.status === 400 ? 400 : 500;
+      res.status(status).json({ message: err?.message ?? "Error al editar la venta" });
+    }
+  }));
+
+  app.delete("/api/sales/:id", isAuthenticated, wrapAsync(async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
+
+    try {
+      await db.transaction(async (tx) => {
+        // 1. Cargar venta con row-level lock para serializar anulaciones concurrentes
+        const [sale] = await tx
+          .select()
+          .from(sales)
+          .where(and(eq(sales.id, id), eq(sales.tenantId, tenantId)))
+          .for("update");
+        if (!sale) throw Object.assign(new Error("Venta no encontrada"), { status: 404 });
+
+        // 2. Idempotente: ya anulada
+        if (sale.status === "void") return;
+
+        // 3. Bloquear anulación si la sesión de caja está cerrada
+        if (sale.cashSessionId) {
+          const [sess] = await tx
+            .select({ status: cashRegisterSessions.status })
+            .from(cashRegisterSessions)
+            .where(and(eq(cashRegisterSessions.id, sale.cashSessionId), eq(cashRegisterSessions.tenantId, tenantId)));
+          if (sess?.status === "closed") {
+            throw Object.assign(
+              new Error("No se puede anular una venta de una sesión de caja cerrada"),
+              { status: 400 }
+            );
+          }
+        }
+
+        // 4. Obtener items de la venta
+        const items = await tx
+          .select()
+          .from(saleItems)
+          .where(eq(saleItems.saleId, id));
+
+        // 5. Marcar venta como anulada (tenantId en WHERE garantiza aislamiento multi-tenant)
+        await tx
+          .update(sales)
+          .set({ status: "void", deletedAt: new Date(), updatedAt: new Date() })
+          .where(and(eq(sales.id, id), eq(sales.tenantId, tenantId)));
+
+        // 6. Revertir stock + registrar movimientos de anulación
+        for (const item of items) {
+          const [prod] = await tx
+            .select()
+            .from(products)
+            .where(and(eq(products.id, item.productId), eq(products.tenantId, tenantId)))
+            .for("update");
+          if (!prod) continue;
+
+          await tx
+            .update(products)
+            .set({ stock: prod.stock + item.cantidad, updatedAt: new Date() })
+            .where(and(eq(products.id, item.productId), eq(products.tenantId, tenantId)));
+
+          await tx.insert(stockMovements).values({
+            ownerId: userId,
+            tenantId,
+            userId,
+            productId: item.productId,
+            tipo: "entrada",
+            cantidad: item.cantidad,
+            observacion: "Anulación de venta",
+            referenciaTipo: "sale_void",
+            referenciaId: id,
+          });
+        }
+      });
+
+      res.json({ ok: true });
+      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements", "cash_session"] });
+    } catch (err: any) {
+      const status = err?.status === 404 ? 404 : err?.status === 400 ? 400 : 500;
+      res.status(status).json({ message: err?.message ?? "Error al anular la venta" });
+    }
+  }));
+
   app.post("/api/sales", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);

@@ -12,7 +12,7 @@ async function calcCurrentTotal(sessionId: string): Promise<number> {
   const [agg] = await db
     .select({ total: sum(sales.total) })
     .from(sales)
-    .where(eq(sales.cashSessionId, sessionId));
+    .where(and(eq(sales.cashSessionId, sessionId), eq(sales.status, "active")));
   return agg?.total ? Number(agg.total) : 0;
 }
 

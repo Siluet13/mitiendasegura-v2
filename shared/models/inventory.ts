@@ -72,6 +72,9 @@ export const sales = pgTable("sales", {
   total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
   observacion: text("observacion"),
   cashSessionId: uuid("cash_session_id"),
+  status: text("status").notNull().default("active"),
+  deletedAt: timestamp("deleted_at"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("sales_tenant_id_idx").on(t.tenantId),
