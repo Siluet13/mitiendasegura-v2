@@ -15,8 +15,18 @@ Sistema de punto de venta (POS) y gestión de inventario para pequeños negocios
 ## Comando para iniciar
 
 ```
-node_modules/.bin/tsx server/index.ts & npm run dev:web
+bun server/index.ts & bunx vite dev
 ```
+
+## Variables de entorno requeridas
+
+| Variable | Descripción | Obligatoria |
+|---|---|---|
+| `DATABASE_URL` | URL de conexión PostgreSQL (provisionada por Replit) | Sí |
+| `SESSION_SECRET` | Secreto para firmar sesiones Express | Sí |
+| `REPL_ID` | ID del Repl (inyectado automáticamente por Replit) | Sí (auto) |
+| `MASTER_ADMIN_ID` | `sub` del usuario admin para acceder a `/admin` | Sí (manual) |
+| `ISSUER_URL` | URL del OIDC issuer (default: Replit Auth) | No |
 
 ## Estructura clave
 
