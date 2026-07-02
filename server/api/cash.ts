@@ -34,46 +34,76 @@ function toResponse(session: typeof cashRegisterSessions.$inferSelect, currentTo
 export function registerCashRoutes(app: Express): void {
   app.get("/api/cash/current", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
+    console.log("[cash] GET /current — userId:", userId, "tenantId:", tenantId ?? "null");
     if (!tenantId) return res.json(null);
 
-    const [session] = await db
-      .select()
-      .from(cashRegisterSessions)
-      .where(and(
-        eq(cashRegisterSessions.tenantId, tenantId),
-        eq(cashRegisterSessions.userId, userId),
-        eq(cashRegisterSessions.status, "open"),
-      ))
-      .limit(1);
+    let session: typeof cashRegisterSessions.$inferSelect | undefined;
+    try {
+      [session] = await db
+        .select()
+        .from(cashRegisterSessions)
+        .where(and(
+          eq(cashRegisterSessions.tenantId, tenantId),
+          eq(cashRegisterSessions.userId, userId),
+          eq(cashRegisterSessions.status, "open"),
+        ))
+        .limit(1);
+      console.log("[cash] GET /current — sesión:", session?.id ?? "ninguna");
+    } catch (err: any) {
+      console.error("[cash] GET /current — ERROR en query sesión:", err?.message, err?.stack);
+      throw err;
+    }
 
     if (!session) return res.json(null);
 
-    const currentTotal = await calcCurrentTotal(session.id);
+    let currentTotal = 0;
+    try {
+      currentTotal = await calcCurrentTotal(session.id);
+      console.log("[cash] GET /current — total calculado:", currentTotal);
+    } catch (err: any) {
+      console.error("[cash] GET /current — ERROR en calcCurrentTotal:", err?.message, err?.stack);
+      throw err;
+    }
+
     res.json(toResponse(session, currentTotal));
   }));
 
   app.post("/api/cash/open", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
-    if (!tenantId) return res.status(500).json({ message: "Tenant no configurado" });
+    console.log("[cash] POST /open — userId:", userId, "tenantId:", tenantId ?? "null");
+    if (!tenantId) return res.status(400).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
 
-    const [existing] = await db
-      .select({ id: cashRegisterSessions.id })
-      .from(cashRegisterSessions)
-      .where(and(
-        eq(cashRegisterSessions.tenantId, tenantId),
-        eq(cashRegisterSessions.userId, userId),
-        eq(cashRegisterSessions.status, "open"),
-      ))
-      .limit(1);
+    let existing: { id: string } | undefined;
+    try {
+      [existing] = await db
+        .select({ id: cashRegisterSessions.id })
+        .from(cashRegisterSessions)
+        .where(and(
+          eq(cashRegisterSessions.tenantId, tenantId),
+          eq(cashRegisterSessions.userId, userId),
+          eq(cashRegisterSessions.status, "open"),
+        ))
+        .limit(1);
+    } catch (err: any) {
+      console.error("[cash] POST /open — ERROR en query existing:", err?.message, err?.stack);
+      throw err;
+    }
 
     if (existing) return res.status(409).json({ message: "Ya hay una caja abierta" });
 
     const initialAmount = Math.max(0, Number(req.body?.initial_amount ?? 0));
 
-    const [session] = await db
-      .insert(cashRegisterSessions)
-      .values({ tenantId, userId, initialAmount: String(initialAmount) })
-      .returning();
+    let session: typeof cashRegisterSessions.$inferSelect;
+    try {
+      [session] = await db
+        .insert(cashRegisterSessions)
+        .values({ tenantId, userId, initialAmount: String(initialAmount) })
+        .returning();
+      console.log("[cash] POST /open — sesión creada:", session.id, "monto:", initialAmount);
+    } catch (err: any) {
+      console.error("[cash] POST /open — ERROR en insert:", err?.message, err?.stack);
+      throw err;
+    }
 
     broadcast(tenantId, { type: "invalidate", entities: ["cash_session"] });
     logEvent({ module: "cash", event: "CASH_OPENED", message: "Caja abierta", userId, ownerId: userId, tenantId, details: { sessionId: session.id, initialAmount } });
@@ -82,32 +112,54 @@ export function registerCashRoutes(app: Express): void {
 
   app.post("/api/cash/close", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
-    if (!tenantId) return res.status(500).json({ message: "Tenant no configurado" });
+    console.log("[cash] POST /close — userId:", userId, "tenantId:", tenantId ?? "null");
+    if (!tenantId) return res.status(400).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
 
-    const [session] = await db
-      .select()
-      .from(cashRegisterSessions)
-      .where(and(
-        eq(cashRegisterSessions.tenantId, tenantId),
-        eq(cashRegisterSessions.userId, userId),
-        eq(cashRegisterSessions.status, "open"),
-      ))
-      .limit(1);
+    let session: typeof cashRegisterSessions.$inferSelect | undefined;
+    try {
+      [session] = await db
+        .select()
+        .from(cashRegisterSessions)
+        .where(and(
+          eq(cashRegisterSessions.tenantId, tenantId),
+          eq(cashRegisterSessions.userId, userId),
+          eq(cashRegisterSessions.status, "open"),
+        ))
+        .limit(1);
+      console.log("[cash] POST /close — sesión encontrada:", session?.id ?? "ninguna");
+    } catch (err: any) {
+      console.error("[cash] POST /close — ERROR en query sesión:", err?.message, err?.stack);
+      throw err;
+    }
 
     if (!session) return res.status(404).json({ message: "No hay caja abierta" });
 
-    const totalSales = await calcCurrentTotal(session.id);
+    let totalSales = 0;
+    try {
+      totalSales = await calcCurrentTotal(session.id);
+      console.log("[cash] POST /close — totalSales:", totalSales);
+    } catch (err: any) {
+      console.error("[cash] POST /close — ERROR en calcCurrentTotal:", err?.message, err?.stack);
+      throw err;
+    }
 
-    const [closed] = await db
-      .update(cashRegisterSessions)
-      .set({
-        status: "closed",
-        closedAt: new Date(),
-        totalSales: String(totalSales),
-        finalAmount: String(Number(session.initialAmount) + totalSales),
-      })
-      .where(eq(cashRegisterSessions.id, session.id))
-      .returning();
+    let closed: typeof cashRegisterSessions.$inferSelect;
+    try {
+      [closed] = await db
+        .update(cashRegisterSessions)
+        .set({
+          status: "closed",
+          closedAt: new Date(),
+          totalSales: String(totalSales),
+          finalAmount: String(Number(session.initialAmount) + totalSales),
+        })
+        .where(eq(cashRegisterSessions.id, session.id))
+        .returning();
+      console.log("[cash] POST /close — caja cerrada:", closed.id, "finalAmount:", closed.finalAmount);
+    } catch (err: any) {
+      console.error("[cash] POST /close — ERROR en update:", err?.message, err?.stack);
+      throw err;
+    }
 
     broadcast(tenantId, { type: "invalidate", entities: ["cash_session"] });
     logEvent({ module: "cash", event: "CASH_CLOSED", message: "Caja cerrada", userId, ownerId: userId, tenantId, details: { sessionId: session.id, totalSales, finalAmount: Number(session.initialAmount) + totalSales } });
