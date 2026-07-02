@@ -53,6 +53,11 @@ export interface BusinessDetail {
   tenantId: string | null;
 }
 
+export interface BusinessEditInput {
+  nombreNegocio?: string;
+  billingCycleEnd?: string | null;
+}
+
 export async function getAdminMe(): Promise<{ isAdmin: boolean }> {
   return apiFetch("/api/admin/me");
 }
@@ -75,6 +80,31 @@ export async function updateLicense(
   });
 }
 
+export async function updateBusinessSettings(
+  ownerId: string,
+  input: BusinessEditInput
+): Promise<void> {
+  await apiFetch(`/api/admin/businesses/${ownerId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function registerPayment(ownerId: string): Promise<void> {
   await apiFetch(`/api/admin/billing/payment/${ownerId}`, { method: "POST" });
+}
+
+export interface DevStats {
+  totalBusinesses: number;
+  totalUsers: number;
+  totalProducts: number;
+  totalSales: number;
+  serverUptime: number;
+  appVersion: string;
+  buildDate: string | null;
+  nodeVersion: string;
+}
+
+export async function getDevStats(): Promise<DevStats> {
+  return apiFetch("/api/admin/dev/stats");
 }

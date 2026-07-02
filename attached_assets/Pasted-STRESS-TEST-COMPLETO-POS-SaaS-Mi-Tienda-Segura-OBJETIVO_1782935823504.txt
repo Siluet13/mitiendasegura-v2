@@ -1,0 +1,113 @@
+STRESS TEST COMPLETO (POS SaaS Mi Tienda Segura)
+
+OBJETIVO:
+Realizar un stress test completo del sistema en entorno real para detectar cuellos de botella en API, problemas de concurrencia (especialmente caja y ventas), fugas de memoria o loops en frontend, saturación de SSE, errores en multi-tenant bajo carga, fallos de DB (locks / race conditions) y degradación de performance en operaciones críticas.
+
+INSTRUCCIONES IMPORTANTES:
+Antes de ejecutar cualquier test:
+
+No modificar código
+Solo observar, medir y registrar
+Si se detecta error, documentar:
+endpoint afectado
+payload
+latencia
+impacto
+severidad (LOW / MEDIUM / HIGH / CRITICAL)
+
+FASE 1 - API STRESS (BACKEND)
+
+Ventas (CRÍTICO):
+
+Ejecutar 50 requests simultáneos a POST /api/sales
+Variar productos, mismo tenant, distintos userId
+Validar:
+no duplicación de ventas
+cashSessionId consistente
+tiempos de respuesta < 500ms promedio
+no errores 500
+
+Caja (CRÍTICO):
+
+20 aperturas simultáneas POST /api/cash/open
+Validar:
+solo 1 sesión abierta por usuario
+no race condition
+DB constraint funcionando
+
+Billing (MEDIO):
+
+20 updates simultáneos PUT /api/admin/businesses/:id
+Validar:
+no “not found”
+persistencia consistente
+SSE broadcast correcto
+
+FASE 2 - SSE / REALTIME
+
+Simular 10 clientes conectados:
+
+abrir dashboard en paralelo
+ejecutar ventas simultáneas
+cambios de caja
+cambios de billing
+
+Validar:
+
+no duplicación de eventos
+no memory leak
+updates consistentes en todos los clientes
+reconexión automática
+
+FASE 3 - FRONTEND STRESS
+
+En navegador:
+
+abrir 5 pestañas del POS
+hacer ventas rápidas (spam click)
+abrir/cerrar caja repetidamente
+navegar entre productos/clientes
+
+Validar:
+
+no loops de fetch
+no spinner infinito
+no congelamiento UI
+React Query no entra en loop
+
+FASE 4 - MULTI-TENANT ISOLATION
+
+Simular 2 tenants:
+
+mismo endpoint con distintos tenantId
+
+Validar:
+
+no fuga de datos
+no mezcla de ventas
+no mezcla de caja
+no mezcla de billing
+
+OUTPUT OBLIGATORIO
+
+Performance report:
+latency promedio por endpoint
+endpoint más lento
+carga máxima soportada
+Stability report:
+crashes
+errores 500
+race conditions detectadas
+Realtime report:
+SSE issues
+sync issues
+Critical issues list ordenado por severidad
+
+BONUS:
+
+simular caída de red (offline mode)
+simular reconexión
+simular refresh durante venta
+
+NOTA:
+No optimizar durante el test. Solo medir comportamiento real del sistema.

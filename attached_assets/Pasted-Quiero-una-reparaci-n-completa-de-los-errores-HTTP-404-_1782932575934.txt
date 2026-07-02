@@ -1,0 +1,141 @@
+Quiero una reparación completa de los errores HTTP 404 actuales en la aplicación Mi Tienda Segura.
+
+IMPORTANTE:
+
+Antes de escribir código, realizar auditoría completa del backend activo.
+
+NO asumir que las rutas existen o están correctas.
+
+------------------------------------------------------------
+
+PROBLEMAS ACTUALES (CONFIRMADOS)
+
+Frontend intenta acceder a:
+
+1. Caja
+- POST /api/cash/open → 404
+- GET /api/cash/current → 404
+
+2. Billing admin
+- PUT /api/admin/businesses/:ownerId → 404
+
+3. Comprobantes
+- GET/PUT funciona parcialmente pero NO persiste:
+  - sitio web
+  - logo URL
+  - mensaje de pie
+
+------------------------------------------------------------
+
+OBJETIVO
+
+Restaurar funcionamiento completo de:
+
+✔ Caja (open, current, close)
+✔ Billing admin (update business + payment + vencimiento)
+✔ Comprobantes (persistencia correcta de todos los campos)
+
+SIN romper:
+- POS
+- ventas
+- sincronización SSE
+- auth
+- billing base
+- schema DB
+
+------------------------------------------------------------
+
+FASE 1 — AUDITORÍA OBLIGATORIA
+
+Revisar en profundidad:
+
+server/index.ts
+server/api/cash.ts
+server/api/admin.ts
+server/api/receipts.ts
+src/lib/api/cash.ts
+src/lib/api/admin.ts
+src/lib/api/receipts.ts
+
+Verificar:
+
+- Qué routers están realmente registrados
+- Qué rutas existen en runtime
+- Qué prefijos están aplicados (/api, /admin, etc.)
+- Si algún registerXRoutes(app) falta
+- Si hay mismatch entre frontend y backend URLs
+
+------------------------------------------------------------
+
+FASE 2 — CORRECCIONES CRÍTICAS
+
+1. CASH API
+
+Asegurar que existan y estén montadas:
+
+- POST /api/cash/open
+- GET /api/cash/current
+- POST /api/cash/close
+
+Verificar:
+- registerCashRoutes está importado
+- está ejecutándose en server/index.ts
+- no hay prefijos duplicados
+
+------------------------------------------------------------
+
+2. ADMIN BILLING API
+
+Asegurar que exista:
+
+- PUT /api/admin/businesses/:ownerId
+- endpoints de payment y license update
+
+Verificar:
+- registerAdminRoutes montado correctamente
+- parámetros correctos (:ownerId vs :id mismatch)
+
+------------------------------------------------------------
+
+3. RECEIPTS SETTINGS BUG
+
+Corregir persistencia de:
+
+- sitio_web
+- logo_url
+- mensaje_pie
+
+Verificar:
+
+- GET y PUT usan el mismo mapper (NO raw Drizzle)
+- no hay mismatch camelCase vs snake_case
+- frontend y backend usan el mismo contrato
+
+------------------------------------------------------------
+
+FASE 3 — VALIDACIÓN
+
+Probar:
+
+✔ Abrir caja → HTTP 200
+✔ Consultar caja → HTTP 200
+✔ Billing update → no 404 + persiste cambios
+✔ Comprobantes → guardan y recargan correctamente
+
+------------------------------------------------------------
+
+REGLAS ESTRICTAS
+
+- No modificar lógica de negocio
+- No cambiar schema DB
+- No crear features nuevas
+- Solo reparar rutas, registros y mapeos inconsistentes
+- Cambios quirúrgicos únicamente
+
+------------------------------------------------------------
+
+AL FINAL ENTREGAR:
+
+- lista de archivos modificados
+- causa exacta de cada 404
+- confirmación de endpoints funcionando

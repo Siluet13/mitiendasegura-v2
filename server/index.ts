@@ -6,11 +6,14 @@ import { registerInventoryRoutes } from "./api/inventory";
 import { registerDashboardRoutes } from "./api/dashboard";
 import { registerSettingsRoutes } from "./api/settings";
 import { registerBackupRoutes } from "./api/backup";
+import { registerCashRoutes } from "./api/cash";
 import { registerLicenseRoutes } from "./api/license";
 import { registerBillingRoutes } from "./api/billing";
 import { registerAdminRoutes } from "./api/admin";
 import { registerEventsRoutes } from "./api/events";
 import { registerReceiptsRoutes } from "./api/receipts";
+import { registerLogsRoutes } from "./api/logs";
+import { logEvent } from "./lib/logger";
 import { checkLicense } from "./middleware/license";
 import { resolveTenant } from "./middleware/tenant";
 
@@ -43,6 +46,7 @@ if (existsSync(clientDir)) {
   registerLicenseRoutes(app);
   registerBillingRoutes(app);
   registerAdminRoutes(app);
+  registerLogsRoutes(app);
 
   app.use("/api", checkLicense);
 
@@ -51,6 +55,7 @@ if (existsSync(clientDir)) {
   registerSettingsRoutes(app);
   registerReceiptsRoutes(app);
   registerBackupRoutes(app);
+  registerCashRoutes(app);
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
@@ -89,6 +94,9 @@ if (existsSync(clientDir)) {
     const code = err?.code ?? undefined;
     if (!res.headersSent) {
       res.status(status).json({ error: message, ...(code ? { code } : {}) });
+    }
+    if (status === 500) {
+      logEvent({ level: "error", module: "system", event: "HTTP_500", message: message.slice(0, 500), userId: (req as any).user?.claims?.sub ?? null, ownerId: (req as any).user?.claims?.sub ?? null, tenantId: (req as any).tenantId ?? null, details: { path: req.path, method: req.method } });
     }
   });
 

@@ -11,6 +11,7 @@ import {
 } from "@/lib/api/inventory";
 import { dequeue, listPending, requeueProcessingOlderThan, updateStatus } from "./queue";
 import { log } from "./logger";
+import { logSyncEvent } from "@/lib/api/logs";
 
 type OfflineSalePayload = {
   items: SaleItemInput[];
@@ -184,6 +185,7 @@ export async function syncAllPending(qc: QueryClient, trigger: "auto" | "manual"
     if (all.length === 0) return;
 
     log("SYNC_START", { count: all.length });
+    void logSyncEvent("SYNC_START", `Sincronizando ${all.length} operaciones pendientes`, "info", { count: all.length, trigger });
     toastId = toast.loading(
       `Sincronizando ${all.length} operación${all.length !== 1 ? "es" : ""} pendiente${all.length !== 1 ? "s" : ""}…`,
     );
@@ -202,10 +204,12 @@ export async function syncAllPending(qc: QueryClient, trigger: "auto" | "manual"
 
     if (totalSynced > 0 || totalFailed === 0) {
       log("SYNC_SUCCESS", { synced: totalSynced, failed: totalFailed });
+      void logSyncEvent("SYNC_SUCCESS", `Sincronización completa: ${totalSynced} OK, ${totalFailed} errores`, "info", { synced: totalSynced, failed: totalFailed, trigger });
       if (trigger === "auto") log("AUTO_SYNC_SUCCESS", { synced: totalSynced, failed: totalFailed });
     }
     if (totalFailed > 0) {
       log("SYNC_ERROR", { synced: totalSynced, failed: totalFailed }, "warn");
+      void logSyncEvent("SYNC_ERROR", `Errores de sincronización: ${totalFailed} fallaron`, "warning", { synced: totalSynced, failed: totalFailed, trigger });
       if (trigger === "auto") log("AUTO_SYNC_ERROR", { synced: totalSynced, failed: totalFailed }, "warn");
     }
 
@@ -226,6 +230,7 @@ export async function syncAllPending(qc: QueryClient, trigger: "auto" | "manual"
     toast.dismiss(toastId);
     toast.error("Error al sincronizar operaciones pendientes");
     log("SYNC_ERROR", { message: "uncaught exception in syncAllPending" }, "error");
+    void logSyncEvent("SYNC_UNCAUGHT_ERROR", "Error inesperado durante la sincronización", "error");
   } finally {
     isSyncing = false;
   }

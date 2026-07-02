@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Building2, ChevronDown, LogOut, RefreshCw, CreditCard } from "lucide-react";
+import { Building2, ChevronDown, LogOut, RefreshCw, CreditCard, Code2 } from "lucide-react";
 import { toast } from "sonner";
 import { listBusinesses, updateLicense, registerPayment } from "@/lib/api/admin";
 import type { BusinessRow } from "@/lib/api/admin";
@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { BusinessDetailSheet } from "@/components/admin/BusinessDetailSheet";
 
 export const Route = createFileRoute("/admin/")({
   head: () => ({ meta: [{ title: "Panel Maestro" }] }),
@@ -81,6 +82,7 @@ function AdminIndex() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState<FilterMode>("");
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string | null>(null);
 
   const { data: businesses = [], isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/businesses"],
@@ -149,6 +151,11 @@ function AdminIndex() {
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
               <a href="/admin/offline-debug">Diagnóstico Offline</a>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href="/admin/dev">
+                <Code2 className="h-4 w-4 mr-1" /> Panel Dev
+              </a>
             </Button>
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               <RefreshCw className="h-4 w-4 mr-1" /> Actualizar
@@ -248,7 +255,11 @@ function AdminIndex() {
                   </TableHeader>
                   <TableBody>
                     {filtered.map((b) => (
-                      <TableRow key={b.ownerId}>
+                      <TableRow
+                        key={b.ownerId}
+                        className="cursor-pointer hover:bg-muted/60"
+                        onClick={() => setSelectedOwnerId(b.ownerId)}
+                      >
                         <TableCell>
                           <div className="font-medium text-sm">{b.email ?? b.ownerId}</div>
                           {b.nombreNegocio && (
@@ -267,7 +278,7 @@ function AdminIndex() {
                         <TableCell className="text-right text-sm">{b.productCount}</TableCell>
                         <TableCell className="text-right text-sm">{b.saleCount}</TableCell>
                         <TableCell className="text-right text-sm">{b.customerCount}</TableCell>
-                        <TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="outline" size="sm" disabled={isPending}>
@@ -275,6 +286,12 @@ function AdminIndex() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => setSelectedOwnerId(b.ownerId)}
+                              >
+                                Ver ficha
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onClick={() => paymentMut.mutate(b.ownerId)}
                                 className="gap-2"
@@ -333,6 +350,11 @@ function AdminIndex() {
           </CardContent>
         </Card>
       </div>
+
+      <BusinessDetailSheet
+        ownerId={selectedOwnerId}
+        onClose={() => setSelectedOwnerId(null)}
+      />
     </div>
   );
 }

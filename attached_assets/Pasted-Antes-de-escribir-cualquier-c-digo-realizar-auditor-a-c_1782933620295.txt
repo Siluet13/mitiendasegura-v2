@@ -1,0 +1,99 @@
+Antes de escribir cualquier código, realizar auditoría completa del arranque del servidor (runtime bootstrap).
+
+OBJETIVO:
+Resolver el problema por el cual el backend no inicia correctamente o se termina inmediatamente después de iniciar.
+
+SÍNTOMA ACTUAL:
+- API server inicia en port 5001
+- luego el proceso se termina (Terminated bun server/index.ts)
+- aparecen múltiples warnings de tsconfig-paths parsing .cache / .local / artifacts
+
+------------------------------------------------------------
+
+HIPÓTESIS A VALIDAR (NO ASUMIR):
+
+- tsconfig-paths está interfiriendo con el runtime de Bun
+- el loader está escaneando directorios internos (.cache, artifacts, node_modules)
+- esto provoca warnings y posible crash del proceso
+- el problema NO es de lógica de negocio ni de endpoints
+
+------------------------------------------------------------
+
+FASE 1 — AUDITORÍA OBLIGATORIA
+
+Revisar:
+
+server/index.ts
+package.json
+tsconfig.json
+entrypoint del server (bun run / dev script)
+cualquier import de:
+- tsconfig-paths
+- dotenv loaders
+- register modules de path alias
+
+Identificar:
+
+- dónde se inicializa tsconfig-paths
+- si está activo en runtime (no solo dev)
+- si Bun está ejecutando un loader incompatible
+- si hay crash silencioso posterior al startup
+
+------------------------------------------------------------
+
+FASE 2 — CORRECCIÓN
+
+OBJETIVO PRINCIPAL:
+
+Eliminar cualquier causa de crash en el startup del servidor.
+
+REGLAS:
+
+- NO modificar lógica de negocio
+- NO tocar endpoints
+- NO tocar DB schema
+- SOLO modificar bootstrap/runtime
+
+ACCIONES POSIBLES (según auditoría):
+
+1. Eliminar tsconfig-paths del runtime si está presente:
+   - NO debe ejecutarse en Bun runtime
+
+2. Si se necesita mantener:
+   - moverlo a entorno dev-only (NODE_ENV === "development")
+
+3. Asegurar que Bun no esté usando loaders incompatibles
+
+4. Verificar que server/index.ts final:
+   - no tenga side effects peligrosos en import
+   - no tenga inicialización async sin control
+
+------------------------------------------------------------
+
+FASE 3 — VALIDACIÓN
+
+Verificar:
+
+✔ bun server/index.ts inicia sin crash
+✔ API server queda activo
+✔ no aparece “Terminated”
+✔ Vite frontend conecta correctamente
+✔ /api/auth/user responde (401 esperado si no hay sesión)
+
+------------------------------------------------------------
+
+IMPORTANTE
+
+- Este es un problema de runtime/bootstrap, no de aplicación
+- No asumir que el bug está en endpoints
+- No aplicar fixes de lógica de negocio
+- Cambios deben ser mínimos y seguros
+
+------------------------------------------------------------
+
+ENTREGAR AL FINAL:
+
+- causa exacta del crash
+- archivo responsable
+- cambio aplicado
+- confirmación de startup estable

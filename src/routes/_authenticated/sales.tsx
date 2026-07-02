@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Trash2, Eye, User, WifiOff, Printer } from "lucide-react";
+import { Plus, Trash2, Eye, User, WifiOff, Printer, Wallet, LockOpen, Lock } from "lucide-react";
 import {
   createSale,
   getSaleWithItems,
@@ -38,6 +38,7 @@ import {
 } from "@/components/sales/PosScannerInput";
 import { LastScannedPanel } from "@/components/sales/LastScannedPanel";
 import { ReceiptDialog } from "@/components/receipts/ReceiptDialog";
+import { getCashSession, openCash, closeCash, type CashSession } from "@/lib/api/cash";
 
 export const Route = createFileRoute("/_authenticated/sales")({
   head: () => ({ meta: [{ title: "Ventas" }] }),
@@ -60,6 +61,150 @@ type OfflineSalePayload = {
 const fmt = (n: number) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(n);
 
+// ── Cash Register Bar ──────────────────────────────────────────────────────────
+function CashRegisterBar({
+  session,
+  isLoading,
+}: {
+  session: CashSession | null;
+  isLoading: boolean;
+}) {
+  const qc = useQueryClient();
+  const [openModal, setOpenModal] = useState(false);
+  const [closeModal, setCloseModal] = useState(false);
+  const [initialAmount, setInitialAmount] = useState("0");
+
+  const openMut = useMutation({
+    mutationFn: () => openCash(Math.max(0, parseFloat(initialAmount || "0"))),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cash_session"] });
+      setOpenModal(false);
+      setInitialAmount("0");
+      toast.success("Caja abierta");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const closeMut = useMutation({
+    mutationFn: closeCash,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["cash_session"] });
+      setCloseModal(false);
+      toast.success(`Caja cerrada — Total ventas: ${fmt(data.current_total)}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (isLoading) return null;
+
+  const isOpen = session?.status === "open";
+
+  return (
+    <>
+      <div
+        className={[
+          "flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-2.5",
+          isOpen
+            ? "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30"
+            : "border-dashed border-muted-foreground/30 bg-muted/30",
+        ].join(" ")}
+      >
+        <div className="flex items-center gap-2">
+          <Wallet className={["h-4 w-4", isOpen ? "text-emerald-600" : "text-muted-foreground"].join(" ")} />
+          {isOpen ? (
+            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+              Caja abierta ·{" "}
+              <span className="tabular-nums font-bold">
+                {fmt(session!.current_total)}
+              </span>{" "}
+              en ventas
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground">Sin caja abierta</span>
+          )}
+        </div>
+        {isOpen ? (
+          <Button size="sm" variant="outline" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:text-emerald-400" onClick={() => setCloseModal(true)}>
+            <Lock className="h-3.5 w-3.5" /> Cerrar Caja
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setOpenModal(true)}>
+            <LockOpen className="h-3.5 w-3.5" /> Abrir Caja
+          </Button>
+        )}
+      </div>
+
+      {/* ── Abrir caja modal ───────────────────────────────────────────── */}
+      <Dialog open={openModal} onOpenChange={setOpenModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LockOpen className="h-4 w-4" /> Abrir Caja
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="initial-amount">Monto inicial en caja</Label>
+              <Input
+                id="initial-amount"
+                type="number"
+                min={0}
+                step={0.01}
+                value={initialAmount}
+                onChange={(e) => setInitialAmount(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpenModal(false)}>Cancelar</Button>
+            <Button onClick={() => openMut.mutate()} disabled={openMut.isPending}>
+              {openMut.isPending ? "Abriendo…" : "Abrir Caja"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Cerrar caja modal ──────────────────────────────────────────── */}
+      <Dialog open={closeModal} onOpenChange={setCloseModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="h-4 w-4" /> Cerrar Caja
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-2 text-sm text-muted-foreground">
+            <p>¿Confirmás el cierre de caja?</p>
+            {session && (
+              <div className="rounded-md border p-3 space-y-1 text-foreground">
+                <div className="flex justify-between">
+                  <span>Monto inicial</span>
+                  <span className="tabular-nums font-medium">{fmt(Number(session.initial_amount))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Ventas del turno</span>
+                  <span className="tabular-nums font-medium">{fmt(session.current_total)}</span>
+                </div>
+                <div className="flex justify-between border-t pt-1 font-semibold">
+                  <span>Total en caja</span>
+                  <span className="tabular-nums">{fmt(Number(session.initial_amount) + session.current_total)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCloseModal(false)}>Cancelar</Button>
+            <Button variant="destructive" onClick={() => closeMut.mutate()} disabled={closeMut.isPending}>
+              {closeMut.isPending ? "Cerrando…" : "Confirmar cierre"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 // ── Small keyboard badge ───────────────────────────────────────────────────────
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
@@ -81,6 +226,14 @@ function SalesPage() {
     skipAutoActions: boolean;
   } | null>(null);
 
+  const { data: cashSession, isLoading: cashLoading } = useQuery<CashSession | null>({
+    queryKey: ["cash_session"],
+    queryFn: getCashSession,
+    refetchInterval: 30_000,
+  });
+
+  const cashIsOpen = cashSession?.status === "open";
+
   const { data: sales = [], isLoading } = useQuery({ queryKey: ["sales"], queryFn: listSales });
   const { data: products = [] } = useQuery({ queryKey: ["products"], queryFn: listProducts });
   const { data: customers = [] } = useQuery({
@@ -99,20 +252,26 @@ function SalesPage() {
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (open || detailId) return;
-      if (e.key === "F5") {
+      if (e.key === "F5" && cashIsOpen) {
         e.preventDefault();
         setOpen(true);
       }
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [open, detailId]);
+  }, [open, detailId, cashIsOpen]);
 
   return (
     <div className="space-y-4">
+      <CashRegisterBar session={cashSession ?? null} isLoading={cashLoading} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Ventas</h1>
-        <Button onClick={() => setOpen(true)} className="gap-2">
+        <Button
+          onClick={() => setOpen(true)}
+          className="gap-2"
+          disabled={!cashIsOpen}
+          title={!cashIsOpen ? "Abrí la caja para registrar ventas" : undefined}
+        >
           <Plus className="h-4 w-4" /> Nueva venta
           <Kbd>F5</Kbd>
         </Button>
@@ -205,6 +364,7 @@ function SalesPage() {
           qc.invalidateQueries({ queryKey: ["sales"] });
           qc.invalidateQueries({ queryKey: ["products"] });
           qc.invalidateQueries({ queryKey: ["stock_movements"] });
+          qc.invalidateQueries({ queryKey: ["cash_session"] });
         }}
         onSaleCompleted={(saleId, receiptNumber, cid) => {
           setPendingReceipt({ saleId, receiptNumber, customerId: cid, skipAutoActions: false });

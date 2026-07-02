@@ -13,6 +13,7 @@ import {
   saleItems,
   stockMovements,
   receiptSettings,
+  cashRegisterSessions,
 } from "@shared/schema";
 
 function noTenant(res: any) {
@@ -381,6 +382,16 @@ export function registerInventoryRoutes(app: Express): void {
           if (!cust) throw Object.assign(new Error("Cliente no encontrado"), { status: 400 });
         }
 
+        const [activeSession] = await tx
+          .select({ id: cashRegisterSessions.id })
+          .from(cashRegisterSessions)
+          .where(and(
+            eq(cashRegisterSessions.tenantId, tenantId),
+            eq(cashRegisterSessions.userId, userId),
+            eq(cashRegisterSessions.status, "open"),
+          ))
+          .limit(1);
+
         const [newSale] = await tx
           .insert(sales)
           .values({
@@ -391,6 +402,7 @@ export function registerInventoryRoutes(app: Express): void {
             total: "0",
             observacion: observacion ?? null,
             customerId: customer_id ?? null,
+            cashSessionId: activeSession?.id ?? null,
           })
           .returning();
 
@@ -473,7 +485,7 @@ export function registerInventoryRoutes(app: Express): void {
       });
 
       res.json(result);
-      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements"] });
+      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements", "cash_session"] });
     } catch (err: any) {
       const status = (err as any).status === 400 ? 400 : 500;
       const message = err?.message ?? "Error al registrar la venta";

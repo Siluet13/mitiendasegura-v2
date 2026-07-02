@@ -71,9 +71,11 @@ export const sales = pgTable("sales", {
   receiptNumber: text("receipt_number"),
   total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
   observacion: text("observacion"),
+  cashSessionId: uuid("cash_session_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("sales_tenant_id_idx").on(t.tenantId),
+  index("sales_cash_session_id_idx").on(t.cashSessionId),
   uniqueIndex("sales_tenant_client_id_idx").on(t.tenantId, t.clientId),
 ]);
 
