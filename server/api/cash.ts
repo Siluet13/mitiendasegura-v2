@@ -6,6 +6,7 @@ import { requireTenant } from "../lib/context";
 import { wrapAsync } from "../lib/asyncHandler";
 import { broadcast } from "../lib/events";
 import { logEvent } from "../lib/logger";
+import { recalculateCashSession } from "../lib/reconciliation";
 import { cashRegisterSessions, sales } from "@shared/schema";
 
 async function calcCurrentTotal(sessionId: string): Promise<number> {
@@ -126,54 +127,57 @@ export function registerCashRoutes(app: Express): void {
     console.log("[cash] POST /close — userId:", userId, "tenantId:", tenantId ?? "null");
     if (!tenantId) return res.status(400).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
 
-    let session: typeof cashRegisterSessions.$inferSelect | undefined;
-    try {
-      [session] = await db
-        .select()
-        .from(cashRegisterSessions)
-        .where(and(
-          eq(cashRegisterSessions.tenantId, tenantId),
-          eq(cashRegisterSessions.userId, userId),
-          eq(cashRegisterSessions.status, "open"),
-        ))
-        .limit(1);
-      console.log("[cash] POST /close — sesión encontrada:", session?.id ?? "ninguna");
-    } catch (err: any) {
-      logCashError("POST /close", "select open session", err);
-      throw err;
-    }
-
-    if (!session) return res.status(404).json({ message: "No hay caja abierta" });
-
-    let totalSales = 0;
-    try {
-      totalSales = await calcCurrentTotal(session.id);
-      console.log("[cash] POST /close — totalSales:", totalSales);
-    } catch (err: any) {
-      logCashError("POST /close", "calcCurrentTotal", err);
-      throw err;
-    }
-
     let closed: typeof cashRegisterSessions.$inferSelect;
+    let totalSales: number;
+
     try {
-      [closed] = await db
-        .update(cashRegisterSessions)
-        .set({
-          status: "closed",
-          closedAt: new Date(),
-          totalSales: String(totalSales),
-          finalAmount: String(Number(session.initialAmount) + totalSales),
-        })
-        .where(eq(cashRegisterSessions.id, session.id))
-        .returning();
-      console.log("[cash] POST /close — caja cerrada:", closed.id, "finalAmount:", closed.finalAmount);
+      // Wrap in a transaction so the reconciliation and the status update are atomic.
+      // FOR UPDATE on the session prevents concurrent closes.
+      [closed, totalSales] = await db.transaction(async (tx) => {
+        const [session] = await tx
+          .select()
+          .from(cashRegisterSessions)
+          .where(and(
+            eq(cashRegisterSessions.tenantId, tenantId),
+            eq(cashRegisterSessions.userId, userId),
+            eq(cashRegisterSessions.status, "open"),
+          ))
+          .limit(1)
+          .for("update");
+
+        if (!session) throw Object.assign(new Error("No hay caja abierta"), { status: 404 });
+
+        console.log("[cash] POST /close — sesión encontrada:", session.id);
+
+        // Recalculate totalSales from source of truth inside the transaction
+        const total = await recalculateCashSession(session.id, tenantId, tx);
+        console.log("[cash] POST /close — totalSales (recalculado):", total);
+
+        const [result] = await tx
+          .update(cashRegisterSessions)
+          .set({
+            status: "closed",
+            closedAt: new Date(),
+            totalSales: String(total),
+            finalAmount: String(Number(session.initialAmount) + total),
+          })
+          .where(and(
+            eq(cashRegisterSessions.id, session.id),
+            eq(cashRegisterSessions.tenantId, tenantId),
+          ))
+          .returning();
+
+        console.log("[cash] POST /close — caja cerrada:", result.id, "finalAmount:", result.finalAmount);
+        return [result, total] as const;
+      });
     } catch (err: any) {
-      logCashError("POST /close", "update cashRegisterSessions", err);
+      logCashError("POST /close", "transaction", err);
+      if (err?.status === 404) return res.status(404).json({ message: err.message });
       throw err;
     }
 
     broadcast(tenantId, { type: "invalidate", entities: ["cash_session"] });
-    logEvent({ module: "cash", event: "CASH_CLOSED", message: "Caja cerrada", userId, ownerId: userId, tenantId, details: { sessionId: session.id, totalSales, finalAmount: Number(session.initialAmount) + totalSales } });
+    logEvent({ module: "cash", event: "CASH_CLOSED", message: "Caja cerrada", userId, ownerId: userId, tenantId, details: { sessionId: closed.id, totalSales, finalAmount: Number(closed.finalAmount) } });
     res.json(toResponse(closed, totalSales));
   }));
 }

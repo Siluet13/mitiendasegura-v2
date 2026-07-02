@@ -38,6 +38,7 @@ export const products = pgTable("products", {
   precio: numeric("precio", { precision: 12, scale: 2 }).notNull().default("0"),
   costo: numeric("costo", { precision: 12, scale: 2 }).notNull().default("0"),
   stock: integer("stock").notNull().default(0),
+  initialStock: integer("initial_stock").notNull().default(0),
   stockMinimo: integer("stock_minimo").notNull().default(0),
   activo: boolean("activo").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),

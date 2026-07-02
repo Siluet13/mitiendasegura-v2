@@ -13,6 +13,7 @@ import { registerAdminRoutes } from "./api/admin";
 import { registerEventsRoutes } from "./api/events";
 import { registerReceiptsRoutes } from "./api/receipts";
 import { registerLogsRoutes } from "./api/logs";
+import { registerReconcileRoutes } from "./api/reconcile";
 import { logEvent } from "./lib/logger";
 import { checkLicense } from "./middleware/license";
 import { resolveTenant } from "./middleware/tenant";
@@ -46,6 +47,7 @@ if (existsSync(clientDir)) {
   registerLicenseRoutes(app);
   registerBillingRoutes(app);
   registerAdminRoutes(app);
+  registerReconcileRoutes(app);
   registerLogsRoutes(app);
 
   app.use("/api", checkLicense);

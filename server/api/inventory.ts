@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "../db";
+import { recalculateCashSession } from "../lib/reconciliation";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { broadcast } from "../lib/events";
@@ -136,6 +137,7 @@ export function registerInventoryRoutes(app: Express): void {
         precio: String(body.precio ?? 0),
         costo: String(body.costo ?? 0),
         stock: body.stock ?? 0,
+        initialStock: body.stock ?? 0,
         stockMinimo: body.stock_minimo ?? 0,
         categoryId: body.category_id ?? null,
         activo: body.activo ?? true,
@@ -498,6 +500,11 @@ export function registerInventoryRoutes(app: Express): void {
           .where(and(eq(sales.id, id), eq(sales.tenantId, tenantId)))
           .returning();
 
+        // Phase 4 — anti-drift: reconcile cash session total after edit
+        if (sale.cashSessionId) {
+          await recalculateCashSession(sale.cashSessionId, tenantId, tx);
+        }
+
         return result;
       });
 
@@ -578,6 +585,11 @@ export function registerInventoryRoutes(app: Express): void {
             referenciaTipo: "sale_void",
             referenciaId: id,
           });
+        }
+
+        // Phase 4 — anti-drift: reconcile cash session total after void
+        if (sale.cashSessionId) {
+          await recalculateCashSession(sale.cashSessionId, tenantId, tx);
         }
       });
 
@@ -729,6 +741,12 @@ export function registerInventoryRoutes(app: Express): void {
           .update(sales)
           .set({ total: String(total), receiptNumber })
           .where(eq(sales.id, newSale.id));
+
+        // Phase 4 — anti-drift: reconcile cash session total after each sale
+        if (activeSession?.id) {
+          await recalculateCashSession(activeSession.id, tenantId, tx);
+        }
+
         return { id: newSale.id, receiptNumber };
       });
 
