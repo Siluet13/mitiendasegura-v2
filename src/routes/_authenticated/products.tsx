@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { Pencil, Plus, Trash2, Search, WifiOff } from "lucide-react";
+import { getStockStatus, getStockStatusClass } from "@/lib/stock-status";
 import {
   createProduct,
   deleteProduct,
@@ -310,7 +311,7 @@ function ProductsPage() {
             ) : (
               filtered.map((p) => {
                 const ext = p as Product & { codigo_barras?: string | null; costo?: number | string };
-                const low = p.stock <= p.stock_minimo;
+                const stockStatus = getStockStatus(p.stock, p.stock_minimo);
                 const isOffline = p.id.startsWith(OFFLINE_ID_PREFIX);
                 return (
                   <TableRow key={p.id} className={isOffline ? "opacity-60" : undefined}>
@@ -328,7 +329,7 @@ function ProductsPage() {
                     <TableCell className="text-right tabular-nums">{Number(ext.costo ?? 0).toFixed(2)}</TableCell>
                     <TableCell className="text-right tabular-nums">{Number(p.precio).toFixed(2)}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      <span className={low ? "text-destructive font-medium" : undefined}>{p.stock}</span>
+                      <span className={getStockStatusClass(stockStatus)}>{p.stock}</span>
                     </TableCell>
                     <TableCell>
                       {p.activo ? (

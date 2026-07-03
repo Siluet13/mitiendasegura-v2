@@ -71,6 +71,12 @@ export const sales = pgTable("sales", {
   clientId: text("client_id"),
   receiptNumber: text("receipt_number"),
   total: numeric("total", { precision: 12, scale: 2 }).notNull().default("0"),
+  // Método de pago: null = legado (tratado como cash para compatibilidad)
+  paymentMethod: text("payment_method"), // "cash" | "transfer" | "account" | "mixed"
+  paidAmount: numeric("paid_amount", { precision: 12, scale: 2 }),   // porción efectivo
+  creditAmount: numeric("credit_amount", { precision: 12, scale: 2 }), // cuenta corriente
+  transferAmount: numeric("transfer_amount", { precision: 12, scale: 2 }), // transferencia
+  cashAmount: numeric("cash_amount", { precision: 12, scale: 2 }),   // impacto en caja (computado)
   observacion: text("observacion"),
   cashSessionId: uuid("cash_session_id"),
   status: text("status").notNull().default("active"),
@@ -104,6 +110,10 @@ export const stockMovements = pgTable("stock_movements", {
   observacion: text("observacion"),
   referenciaTipo: text("referencia_tipo"),
   referenciaId: uuid("referencia_id"),
+  // Soft delete / anulación
+  voidedAt: timestamp("voided_at"),
+  voidedBy: varchar("voided_by"),
+  voidReason: text("void_reason"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("stock_movements_tenant_id_idx").on(t.tenantId),

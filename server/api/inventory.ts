@@ -1,7 +1,7 @@
 import type { Express } from "express";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ilike, or, isNull } from "drizzle-orm";
 import { db } from "../db";
-import { recalculateCashSession } from "../lib/reconciliation";
+import { calculateCashImpact, recalculateCashSession, recalculateStock } from "../lib/reconciliation";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { broadcast } from "../lib/events";
@@ -347,7 +347,7 @@ export function registerInventoryRoutes(app: Express): void {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
-    const { items, observacion, customer_id } = req.body;
+    const { items, observacion, customer_id, payment_method, paid_amount, credit_amount, transfer_amount } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "La venta no puede estar vacía" });
@@ -363,6 +363,17 @@ export function registerInventoryRoutes(app: Express): void {
         return res.status(400).json({ message: "Producto duplicado en la venta" });
       }
       seen.add(product_id);
+    }
+
+    // Validate payment method + paid_amount
+    if (payment_method != null && !["cash", "transfer", "account", "mixed"].includes(String(payment_method))) {
+      return res.status(400).json({ message: "Método de pago inválido" });
+    }
+    if (payment_method === "mixed" && paid_amount != null) {
+      const pa = Number(paid_amount);
+      if (!Number.isFinite(pa) || pa < 0) {
+        return res.status(400).json({ message: "Monto en efectivo inválido para pago mixto" });
+      }
     }
 
     try {
@@ -489,12 +500,32 @@ export function registerInventoryRoutes(app: Express): void {
         }
 
         // 8. Actualizar venta (tenantId en WHERE garantiza aislamiento multi-tenant)
+        // Preservar método de pago si no se envía en la request
+        const pmNorm = payment_method !== undefined
+          ? (payment_method && typeof payment_method === "string" ? payment_method : null)
+          : sale.paymentMethod;
+        const paidAmountVal = payment_method !== undefined
+          ? (paid_amount != null ? String(Number(paid_amount)) : null)
+          : sale.paidAmount;
+        const creditAmountVal = payment_method !== undefined
+          ? (credit_amount != null ? String(Number(credit_amount)) : null)
+          : sale.creditAmount;
+        const transferAmountVal = payment_method !== undefined
+          ? (transfer_amount != null ? String(Number(transfer_amount)) : null)
+          : sale.transferAmount;
+        const cashImpact = calculateCashImpact({ total, paymentMethod: pmNorm, paidAmount: paidAmountVal });
+
         const [result] = await tx
           .update(sales)
           .set({
             total: String(total),
             observacion: observacion !== undefined ? (observacion ?? null) : sale.observacion,
             customerId: customer_id !== undefined ? (customer_id ?? null) : sale.customerId,
+            paymentMethod: pmNorm,
+            paidAmount: paidAmountVal,
+            creditAmount: creditAmountVal,
+            transferAmount: transferAmountVal,
+            cashAmount: String(cashImpact),
             updatedAt: new Date(),
           })
           .where(and(eq(sales.id, id), eq(sales.tenantId, tenantId)))
@@ -604,7 +635,7 @@ export function registerInventoryRoutes(app: Express): void {
   app.post("/api/sales", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
-    const { items, observacion, customer_id, client_id } = req.body;
+    const { items, observacion, customer_id, client_id, payment_method, paid_amount, credit_amount, transfer_amount } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "La venta no puede estar vacía" });
@@ -629,6 +660,18 @@ export function registerInventoryRoutes(app: Express): void {
         .where(and(eq(sales.tenantId, tenantId), eq(sales.clientId, client_id)));
       if (existing) {
         return res.json({ id: existing.id, receiptNumber: existing.receiptNumber ?? null });
+      }
+    }
+
+    // Validate payment method + paid_amount
+    const VALID_PMS = ["cash", "transfer", "account", "mixed"];
+    if (payment_method != null && !VALID_PMS.includes(String(payment_method))) {
+      return res.status(400).json({ message: "Método de pago inválido" });
+    }
+    if (payment_method === "mixed" && paid_amount != null) {
+      const pa = Number(paid_amount);
+      if (!Number.isFinite(pa) || pa < 0) {
+        return res.status(400).json({ message: "Monto en efectivo inválido para pago mixto" });
       }
     }
 
@@ -737,9 +780,21 @@ export function registerInventoryRoutes(app: Express): void {
           receiptNumber = `${rSettings.prefijoNumeracion}-${numero.toString().padStart(6, "0")}`;
         }
 
+        // Calcular impacto en caja según método de pago
+        const pmNorm = payment_method && typeof payment_method === "string" ? payment_method : null;
+        const cashImpact = calculateCashImpact({ total, paymentMethod: pmNorm, paidAmount: paid_amount ?? null });
+
         await tx
           .update(sales)
-          .set({ total: String(total), receiptNumber })
+          .set({
+            total: String(total),
+            receiptNumber,
+            paymentMethod: pmNorm,
+            paidAmount: paid_amount != null ? String(Number(paid_amount)) : null,
+            creditAmount: credit_amount != null ? String(Number(credit_amount)) : null,
+            transferAmount: transfer_amount != null ? String(Number(transfer_amount)) : null,
+            cashAmount: String(cashImpact),
+          })
           .where(eq(sales.id, newSale.id));
 
         // Phase 4 — anti-drift: reconcile cash session total after each sale
@@ -764,10 +819,21 @@ export function registerInventoryRoutes(app: Express): void {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const productId = (req as any).query.productId as string | undefined;
+    const q = ((req as any).query.q as string | undefined)?.trim();
 
-    const where = productId
-      ? and(eq(stockMovements.tenantId, tenantId), eq(stockMovements.productId, productId))
-      : eq(stockMovements.tenantId, tenantId);
+    const conditions: ReturnType<typeof eq>[] = [eq(stockMovements.tenantId, tenantId) as any];
+    if (productId) conditions.push(eq(stockMovements.productId, productId) as any);
+    if (q) {
+      const pattern = `%${q}%`;
+      conditions.push(
+        or(
+          ilike(products.nombre, pattern),
+          ilike(products.sku, pattern),
+          ilike(products.codigoBarras, pattern),
+          ilike(categories.nombre, pattern),
+        ) as any,
+      );
+    }
 
     const rows = await db
       .select({
@@ -780,21 +846,64 @@ export function registerInventoryRoutes(app: Express): void {
         observacion: stockMovements.observacion,
         referenciaTipo: stockMovements.referenciaTipo,
         referenciaId: stockMovements.referenciaId,
+        voidedAt: stockMovements.voidedAt,
+        voidedBy: stockMovements.voidedBy,
+        voidReason: stockMovements.voidReason,
         createdAt: stockMovements.createdAt,
         productNombre: products.nombre,
         productSku: products.sku,
       })
       .from(stockMovements)
       .leftJoin(products, eq(stockMovements.productId, products.id))
-      .where(where)
+      .leftJoin(categories, eq(products.categoryId, categories.id))
+      .where(and(...conditions))
       .orderBy(desc(stockMovements.createdAt));
 
     res.json(
       rows.map((r) => ({
         ...r,
+        voidedAt: r.voidedAt ? r.voidedAt.toISOString() : null,
         products: { nombre: r.productNombre ?? "", sku: r.productSku ?? null },
       }))
     );
+  }));
+
+  // Soft delete / anulación de movimiento manual
+  app.delete("/api/stock-movements/:id", isAuthenticated, wrapAsync(async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
+    const { void_reason } = req.body ?? {};
+
+    await db.transaction(async (tx) => {
+      const [mv] = await tx
+        .select()
+        .from(stockMovements)
+        .where(and(eq(stockMovements.id, id), eq(stockMovements.tenantId, tenantId)));
+
+      if (!mv) throw Object.assign(new Error("Movimiento no encontrado"), { status: 404 });
+      if (mv.voidedAt) throw Object.assign(new Error("El movimiento ya está anulado"), { status: 400 });
+      if (
+        mv.referenciaTipo === "sale" ||
+        mv.referenciaTipo === "sale_edit" ||
+        mv.referenciaTipo === "sale_void"
+      ) {
+        throw Object.assign(
+          new Error("Los movimientos generados por ventas no pueden anularse directamente"),
+          { status: 400 },
+        );
+      }
+
+      await tx
+        .update(stockMovements)
+        .set({ voidedAt: new Date(), voidedBy: userId, voidReason: void_reason ?? null })
+        .where(and(eq(stockMovements.id, id), eq(stockMovements.tenantId, tenantId)));
+
+      await recalculateStock(mv.productId, tenantId, tx);
+    });
+
+    res.json({ ok: true });
+    broadcast(tenantId, { type: "invalidate", entities: ["stock_movements", "products"] });
   }));
 
   app.post("/api/stock-movements", isAuthenticated, wrapAsync(async (req, res) => {

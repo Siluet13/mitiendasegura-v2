@@ -17,6 +17,7 @@ import {
   type Customer,
   type Product,
   type SaleItemInput,
+  type SalePaymentInput,
 } from "@/lib/api/inventory";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { enqueue, isNetworkError } from "@/lib/offline/queue";
@@ -58,7 +59,7 @@ type OfflineSalePayload = {
   observacion?: string | null;
   customer_id?: string | null;
   client_id: string;
-};
+} & SalePaymentInput;
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(n);
@@ -469,6 +470,8 @@ function NewSaleDialog({
   const [qty, setQty] = useState<number>(1);
   const [customerId, setCustomerId] = useState<string>(NO_CUSTOMER);
   const [lastScanned, setLastScanned] = useState<{ product: Product; timestamp: number } | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer" | "account" | "mixed">("cash");
+  const [paidAmount, setPaidAmount] = useState<string>("");
 
   // Refs for keyboard navigation
   const scannerRef = useRef<PosScannerInputHandle>(null);
@@ -600,17 +603,31 @@ function NewSaleDialog({
     mutationFn: async (values: { observacion?: string }) => {
       if (lines.length === 0) throw new Error("La venta no puede estar vacía");
       const clientId = crypto.randomUUID();
+      // Calcular montos según método de pago
+      const cashPortion = paymentMethod === "mixed" && paidAmount ? Math.max(0, Number(paidAmount)) : 0;
+      const transferPortion = paymentMethod === "mixed"
+        ? Math.max(0, total - cashPortion)
+        : paymentMethod === "transfer" ? total : 0;
+
       const saleInput = {
         items: lines,
         observacion: values.observacion?.trim() ? values.observacion : null,
         customer_id: customerId !== NO_CUSTOMER ? customerId : null,
         client_id: clientId,
+        payment_method: paymentMethod,
+        paid_amount: paymentMethod === "cash" ? total : paymentMethod === "mixed" ? cashPortion : null,
+        credit_amount: paymentMethod === "account" ? total : null,
+        transfer_amount: transferPortion > 0 ? transferPortion : null,
       };
       const offlinePayload: OfflineSalePayload & { items_snapshot: unknown[]; total: number } = {
         items: saleInput.items,
         observacion: saleInput.observacion,
         customer_id: saleInput.customer_id,
         client_id: clientId,
+        payment_method: paymentMethod,
+        paid_amount: saleInput.paid_amount,
+        credit_amount: saleInput.credit_amount,
+        transfer_amount: saleInput.transfer_amount,
         items_snapshot: lines.map((l) => ({
           product_id: l.product_id,
           cantidad: l.cantidad,
@@ -664,6 +681,8 @@ function NewSaleDialog({
       setQty(1);
       setCustomerId(NO_CUSTOMER);
       setLastScanned(null);
+      setPaymentMethod("cash");
+      setPaidAmount("");
       form.reset({ observacion: "" });
       if (!mut.isPending) mut.reset();
       log("SALE_DIALOG_CLOSED", {});
@@ -876,6 +895,56 @@ function NewSaleDialog({
             </span>
           </div>
 
+          {/* ── Método de pago ────────────────────────────────────────────── */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Método de pago</Label>
+            <div className="flex gap-1.5 flex-wrap">
+              {(["cash", "transfer", "account", "mixed"] as const).map((m) => {
+                const label = m === "cash" ? "Efectivo" : m === "transfer" ? "Transferencia" : m === "account" ? "Cta. cte." : "Mixto";
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setPaymentMethod(m); if (m !== "mixed") setPaidAmount(""); }}
+                    className={[
+                      "rounded-md px-3 py-1.5 text-sm font-medium border transition-colors",
+                      paymentMethod === m
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background border-input hover:bg-accent hover:text-accent-foreground",
+                    ].join(" ")}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {paymentMethod === "mixed" && (
+              <div className="flex items-end gap-2 pt-1">
+                <div className="flex-1 space-y-1">
+                  <Label htmlFor="paid-amount-new" className="text-xs text-muted-foreground">
+                    Efectivo recibido
+                  </Label>
+                  <Input
+                    id="paid-amount-new"
+                    type="number"
+                    min={0}
+                    max={total}
+                    step={0.01}
+                    placeholder="0.00"
+                    value={paidAmount}
+                    onChange={(e) => setPaidAmount(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                  />
+                </div>
+                {paidAmount && Number(paidAmount) > 0 && (
+                  <p className="pb-2 text-sm text-muted-foreground whitespace-nowrap">
+                    Resto: {fmt(Math.max(0, total - Number(paidAmount)))}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* ── Observación ───────────────────────────────────────────────── */}
           <div className="space-y-2">
             <Label htmlFor="observacion">Observación</Label>
@@ -1015,6 +1084,8 @@ function EditSaleDialog({
   const [qty, setQty] = useState(1);
   const [customerId, setCustomerId] = useState(NO_CUSTOMER);
   const [lastScanned, setLastScanned] = useState<{ product: Product; timestamp: number } | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer" | "account" | "mixed">("cash");
+  const [paidAmount, setPaidAmount] = useState<string>("");
   const scannerRef = useRef<PosScannerInputHandle>(null);
   const customerTriggerRef = useRef<HTMLButtonElement>(null);
   const submitBtnRef = useRef<HTMLButtonElement>(null);
@@ -1035,6 +1106,9 @@ function EditSaleDialog({
     setLines(saleData.sale_items.map((i) => ({ product_id: i.productId, cantidad: i.cantidad })));
     setCustomerId(saleData.customerId ?? NO_CUSTOMER);
     form.reset({ observacion: saleData.observacion ?? "" });
+    const pm = (saleData.paymentMethod as "cash" | "transfer" | "account" | "mixed" | null) ?? "cash";
+    setPaymentMethod(pm);
+    setPaidAmount(saleData.paidAmount != null ? String(Number(saleData.paidAmount)) : "");
   }, [saleData, form]);
 
   const productMap = useMemo(() => {
@@ -1120,6 +1194,8 @@ function EditSaleDialog({
     setQty(1);
     setCustomerId(NO_CUSTOMER);
     setLastScanned(null);
+    setPaymentMethod("cash");
+    setPaidAmount("");
     form.reset({ observacion: "" });
     onClose();
   }
@@ -1128,10 +1204,18 @@ function EditSaleDialog({
     mutationFn: async (values: { observacion?: string }) => {
       if (!saleId) throw new Error("No hay venta para editar");
       if (lines.length === 0) throw new Error("La venta no puede estar vacía");
+      const cashPortion = paymentMethod === "mixed" && paidAmount ? Math.max(0, Number(paidAmount)) : 0;
+      const transferPortion = paymentMethod === "mixed"
+        ? Math.max(0, total - cashPortion)
+        : paymentMethod === "transfer" ? total : 0;
       return updateSale(saleId, {
         items: lines,
         observacion: values.observacion?.trim() || null,
         customer_id: customerId !== NO_CUSTOMER ? customerId : null,
+        payment_method: paymentMethod,
+        paid_amount: paymentMethod === "cash" ? total : paymentMethod === "mixed" ? cashPortion : null,
+        credit_amount: paymentMethod === "account" ? total : null,
+        transfer_amount: transferPortion > 0 ? transferPortion : null,
       });
     },
     onSuccess: () => {
@@ -1313,6 +1397,56 @@ function EditSaleDialog({
               >
                 {fmt(total)}
               </span>
+            </div>
+
+            {/* ── Método de pago ──────────────────────────────────────────── */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Método de pago</Label>
+              <div className="flex gap-1.5 flex-wrap">
+                {(["cash", "transfer", "account", "mixed"] as const).map((m) => {
+                  const label = m === "cash" ? "Efectivo" : m === "transfer" ? "Transferencia" : m === "account" ? "Cta. cte." : "Mixto";
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => { setPaymentMethod(m); if (m !== "mixed") setPaidAmount(""); }}
+                      className={[
+                        "rounded-md px-3 py-1.5 text-sm font-medium border transition-colors",
+                        paymentMethod === m
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background border-input hover:bg-accent hover:text-accent-foreground",
+                      ].join(" ")}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {paymentMethod === "mixed" && (
+                <div className="flex items-end gap-2 pt-1">
+                  <div className="flex-1 space-y-1">
+                    <Label htmlFor="paid-amount-edit" className="text-xs text-muted-foreground">
+                      Efectivo recibido
+                    </Label>
+                    <Input
+                      id="paid-amount-edit"
+                      type="number"
+                      min={0}
+                      max={total}
+                      step={0.01}
+                      placeholder="0.00"
+                      value={paidAmount}
+                      onChange={(e) => setPaidAmount(e.target.value)}
+                      onFocus={(e) => e.target.select()}
+                    />
+                  </div>
+                  {paidAmount && Number(paidAmount) > 0 && (
+                    <p className="pb-2 text-sm text-muted-foreground whitespace-nowrap">
+                      Resto: {fmt(Math.max(0, total - Number(paidAmount)))}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">

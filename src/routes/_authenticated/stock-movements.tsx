@@ -1,15 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { ArrowDownToLine, ArrowUpFromLine, Plus } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Ban, Plus, Search } from "lucide-react";
 import {
   createStockMovement,
   listProducts,
   listStockMovements,
+  voidStockMovement,
   type StockMovementInput,
 } from "@/lib/api/inventory";
 import { log } from "@/lib/offline/logger";
@@ -19,13 +20,36 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 
 export const Route = createFileRoute("/_authenticated/stock-movements")({
@@ -34,6 +58,7 @@ export const Route = createFileRoute("/_authenticated/stock-movements")({
 });
 
 const ALL = "__all__";
+const DEBOUNCE_MS = 350;
 
 const schema = z.object({
   product_id: z.string().uuid("Seleccioná un producto"),
@@ -53,19 +78,56 @@ const defaults: FormValues = {
 function StockMovementsPage() {
   const qc = useQueryClient();
   const [filterProduct, setFilterProduct] = useState<string>(ALL);
+  const [searchText, setSearchText] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [open, setOpen] = useState(false);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
 
-  const { data: products = [] } = useQuery({ queryKey: ["products"], queryFn: listProducts });
-  const { data: movements = [], isLoading } = useQuery({
-    queryKey: ["stock_movements", filterProduct],
-    queryFn: () => listStockMovements({ productId: filterProduct === ALL ? null : filterProduct }),
+  // Debounce the search text → debouncedQ drives the query
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedQ(searchText.trim());
+    }, DEBOUNCE_MS);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchText]);
+
+  const { data: products = [] } = useQuery({
+    queryKey: ["products"],
+    queryFn: listProducts,
   });
 
-  const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: defaults });
+  const { data: movements = [], isLoading } = useQuery({
+    queryKey: ["stock_movements", filterProduct, debouncedQ],
+    queryFn: () =>
+      listStockMovements({
+        productId: filterProduct === ALL ? null : filterProduct,
+        q: debouncedQ || undefined,
+      }),
+  });
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: defaults,
+  });
 
   function openNew() {
-    log("FORM_OPEN", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
-    if (saveMut.status !== "idle") log("FORM_REOPEN", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status });
+    log("FORM_OPEN", {
+      entity: "stock_movement",
+      isPending: saveMut.isPending,
+      status: saveMut.status,
+      isSuccess: saveMut.isSuccess,
+      isError: saveMut.isError,
+    });
+    if (saveMut.status !== "idle")
+      log("FORM_REOPEN", {
+        entity: "stock_movement",
+        isPending: saveMut.isPending,
+        status: saveMut.status,
+      });
     form.reset(defaults);
     setOpen(true);
   }
@@ -84,16 +146,50 @@ function StockMovementsPage() {
       qc.invalidateQueries({ queryKey: ["stock_movements"] });
       qc.invalidateQueries({ queryKey: ["products"] });
       toast.success("Movimiento registrado");
-      log("MUTATION_SETTLED", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status });
-      log("FORM_CLOSE", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status, open });
+      log("MUTATION_SETTLED", {
+        entity: "stock_movement",
+        isPending: saveMut.isPending,
+        status: saveMut.status,
+      });
+      log("FORM_CLOSE", {
+        entity: "stock_movement",
+        isPending: saveMut.isPending,
+        status: saveMut.status,
+        open,
+      });
       setOpen(false);
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const voidMut = useMutation({
+    mutationFn: (id: string) => voidStockMovement(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stock_movements"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+      toast.success("Movimiento anulado");
+      setVoidingId(null);
+    },
+    onError: (e: Error) => {
+      toast.error(e.message);
+      setVoidingId(null);
+    },
+  });
+
   useEffect(() => {
-    log("MUTATION_STATE_CHANGE", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status, isSuccess: saveMut.isSuccess, isError: saveMut.isError });
+    log("MUTATION_STATE_CHANGE", {
+      entity: "stock_movement",
+      isPending: saveMut.isPending,
+      status: saveMut.status,
+      isSuccess: saveMut.isSuccess,
+      isError: saveMut.isError,
+    });
   }, [saveMut.isPending, saveMut.status, saveMut.isSuccess, saveMut.isError]);
+
+  const isSaleMovement = (referenciaTipo: string | null) =>
+    referenciaTipo === "sale" ||
+    referenciaTipo === "sale_edit" ||
+    referenciaTipo === "sale_void";
 
   return (
     <div className="space-y-4">
@@ -104,8 +200,18 @@ function StockMovementsPage() {
         </Button>
       </div>
 
+      {/* ── Filtros ─────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="sm:w-72">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-8"
+            placeholder="Buscar por nombre, SKU, cód. barras o categoría…"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+        </div>
+        <div className="sm:w-64">
           <Select value={filterProduct} onValueChange={setFilterProduct}>
             <SelectTrigger>
               <SelectValue placeholder="Filtrar por producto" />
@@ -113,13 +219,16 @@ function StockMovementsPage() {
             <SelectContent>
               <SelectItem value={ALL}>Todos los productos</SelectItem>
               {products.map((p) => (
-                <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+                <SelectItem key={p.id} value={p.id}>
+                  {p.nombre}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
+      {/* ── Tabla ───────────────────────────────────────────────────────── */}
       <div className="rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
@@ -129,71 +238,126 @@ function StockMovementsPage() {
               <TableHead>Tipo</TableHead>
               <TableHead className="text-right">Cantidad</TableHead>
               <TableHead>Observación</TableHead>
+              <TableHead className="w-14" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground">Cargando...</TableCell></TableRow>
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                  Cargando...
+                </TableCell>
+              </TableRow>
             ) : movements.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground">Sin movimientos</TableCell></TableRow>
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                  Sin movimientos
+                </TableCell>
+              </TableRow>
             ) : (
-              movements.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                    {new Date(m.createdAt).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="font-medium">
-                    {m.products?.nombre ?? "—"}
-                    {m.products?.sku ? <span className="ml-1 text-xs text-muted-foreground">({m.products.sku})</span> : null}
-                  </TableCell>
-                  <TableCell>
-                    {m.tipo === "entrada" ? (
-                      <Badge variant="default" className="gap-1">
-                        <ArrowDownToLine className="h-3 w-3" /> Entrada
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="gap-1">
-                        <ArrowUpFromLine className="h-3 w-3" /> Salida
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{m.cantidad}</TableCell>
-                  <TableCell className="max-w-[24rem] truncate text-sm text-muted-foreground">
-                    {m.observacion ?? "—"}
-                  </TableCell>
-                </TableRow>
-              ))
+              movements.map((m) => {
+                const isVoided = !!m.voidedAt;
+                const canVoid = !isVoided && !isSaleMovement(m.referenciaTipo);
+                return (
+                  <TableRow key={m.id} className={isVoided ? "opacity-50" : undefined}>
+                    <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                      {new Date(m.createdAt).toLocaleString()}
+                    </TableCell>
+                    <TableCell className={["font-medium", isVoided ? "line-through" : ""].join(" ")}>
+                      {m.products?.nombre ?? "—"}
+                      {m.products?.sku ? (
+                        <span className="ml-1 text-xs text-muted-foreground">
+                          ({m.products.sku})
+                        </span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      {isVoided ? (
+                        <Badge variant="outline" className="gap-1 text-muted-foreground">
+                          <Ban className="h-3 w-3" /> Anulado
+                        </Badge>
+                      ) : m.tipo === "entrada" ? (
+                        <Badge variant="default" className="gap-1">
+                          <ArrowDownToLine className="h-3 w-3" /> Entrada
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1">
+                          <ArrowUpFromLine className="h-3 w-3" /> Salida
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{m.cantidad}</TableCell>
+                    <TableCell className="max-w-[24rem] truncate text-sm text-muted-foreground">
+                      {isVoided && m.voidReason ? (
+                        <span className="text-destructive/70">[Anulado: {m.voidReason}]</span>
+                      ) : (
+                        m.observacion ?? "—"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {canVoid && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Anular movimiento"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setVoidingId(m.id)}
+                        >
+                          <Ban className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
       </div>
 
+      {/* ── Nuevo movimiento ─────────────────────────────────────────────── */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Nuevo movimiento</DialogTitle>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit((v) => {
-            log("MUTATION_BEFORE_AWAIT", { entity: "stock_movement", isPending: saveMut.isPending, status: saveMut.status });
-            saveMut.mutate(v);
-          })} className="space-y-4">
+          <form
+            onSubmit={form.handleSubmit((v) => {
+              log("MUTATION_BEFORE_AWAIT", {
+                entity: "stock_movement",
+                isPending: saveMut.isPending,
+                status: saveMut.status,
+              });
+              saveMut.mutate(v);
+            })}
+            className="space-y-4"
+          >
             <div className="space-y-2">
               <Label>Producto</Label>
               <Select
                 value={form.watch("product_id") || undefined}
-                onValueChange={(v) => form.setValue("product_id", v, { shouldValidate: true })}
+                onValueChange={(v) =>
+                  form.setValue("product_id", v, { shouldValidate: true })
+                }
               >
-                <SelectTrigger><SelectValue placeholder="Seleccionar producto" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar producto" />
+                </SelectTrigger>
                 <SelectContent>
                   {products.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.nombre} <span className="text-xs text-muted-foreground">· stock {p.stock}</span>
+                      {p.nombre}{" "}
+                      <span className="text-xs text-muted-foreground">
+                        · stock {p.stock}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               {form.formState.errors.product_id && (
-                <p className="text-sm text-destructive">{form.formState.errors.product_id.message}</p>
+                <p className="text-sm text-destructive">
+                  {form.formState.errors.product_id.message}
+                </p>
               )}
             </div>
 
@@ -202,9 +366,13 @@ function StockMovementsPage() {
                 <Label>Tipo</Label>
                 <Select
                   value={form.watch("tipo")}
-                  onValueChange={(v) => form.setValue("tipo", v as "entrada" | "salida")}
+                  onValueChange={(v) =>
+                    form.setValue("tipo", v as "entrada" | "salida")
+                  }
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="entrada">Entrada</SelectItem>
                     <SelectItem value="salida">Salida</SelectItem>
@@ -213,9 +381,17 @@ function StockMovementsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="cantidad">Cantidad</Label>
-                <Input id="cantidad" type="number" min="1" step="1" {...form.register("cantidad")} />
+                <Input
+                  id="cantidad"
+                  type="number"
+                  min="1"
+                  step="1"
+                  {...form.register("cantidad")}
+                />
                 {form.formState.errors.cantidad && (
-                  <p className="text-sm text-destructive">{form.formState.errors.cantidad.message}</p>
+                  <p className="text-sm text-destructive">
+                    {form.formState.errors.cantidad.message}
+                  </p>
                 )}
               </div>
             </div>
@@ -226,7 +402,9 @@ function StockMovementsPage() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                Cancelar
+              </Button>
               <Button type="submit" disabled={saveMut.isPending}>
                 {saveMut.isPending ? "Guardando..." : "Registrar"}
               </Button>
@@ -234,6 +412,33 @@ function StockMovementsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* ── Confirmar anulación ───────────────────────────────────────────── */}
+      <AlertDialog
+        open={!!voidingId}
+        onOpenChange={(v) => {
+          if (!v) setVoidingId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Anular este movimiento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              El stock del producto se recalculará automáticamente. Esta acción no
+              puede deshacerse.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => voidingId && voidMut.mutate(voidingId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Anular movimiento
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

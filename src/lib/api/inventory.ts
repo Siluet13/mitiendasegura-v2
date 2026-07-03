@@ -52,6 +52,12 @@ export type Sale = {
   customerId: string | null;
   receiptNumber: string | null;
   total: string | number;
+  // Método de pago (null = legado, tratado como cash)
+  paymentMethod: string | null;
+  paidAmount: string | number | null;
+  creditAmount: string | number | null;
+  transferAmount: string | number | null;
+  cashAmount: string | number | null;
   observacion: string | null;
   cashSessionId: string | null;
   status: string;
@@ -83,6 +89,10 @@ export type StockMovement = {
   observacion: string | null;
   referenciaTipo: string | null;
   referenciaId: string | null;
+  // Soft delete / anulación
+  voidedAt: string | null;
+  voidedBy: string | null;
+  voidReason: string | null;
   createdAt: string;
   products?: { nombre: string; sku: string | null } | null;
 };
@@ -210,12 +220,19 @@ export async function getSaleWithItems(id: string): Promise<SaleWithItems | null
   return apiFetch(`/api/sales/${id}`);
 }
 
+export type SalePaymentInput = {
+  payment_method?: "cash" | "transfer" | "account" | "mixed" | null;
+  paid_amount?: number | null;
+  credit_amount?: number | null;
+  transfer_amount?: number | null;
+};
+
 export async function createSale(input: {
   items: SaleItemInput[];
   observacion?: string | null;
   customer_id?: string | null;
   client_id?: string | null;
-}) {
+} & SalePaymentInput) {
   return apiFetch<{ id: string; receiptNumber: string | null }>("/api/sales", {
     method: "POST",
     body: JSON.stringify({
@@ -223,6 +240,10 @@ export async function createSale(input: {
       observacion: input.observacion,
       customer_id: input.customer_id,
       client_id: input.client_id ?? null,
+      payment_method: input.payment_method ?? null,
+      paid_amount: input.paid_amount ?? null,
+      credit_amount: input.credit_amount ?? null,
+      transfer_amount: input.transfer_amount ?? null,
     }),
     timeoutMs: 3000,
   });
@@ -230,7 +251,7 @@ export async function createSale(input: {
 
 export async function updateSale(
   id: string,
-  input: { items: SaleItemInput[]; observacion?: string | null; customer_id?: string | null }
+  input: { items: SaleItemInput[]; observacion?: string | null; customer_id?: string | null } & SalePaymentInput
 ) {
   return apiFetch<Sale>(`/api/sales/${id}`, {
     method: "PUT",
@@ -247,9 +268,19 @@ export async function voidSale(id: string) {
 }
 
 // ── Stock Movements ───────────────────────────────────────────────────────────
-export async function listStockMovements(params: { productId?: string | null } = {}): Promise<StockMovement[]> {
-  const qs = params.productId ? `?productId=${params.productId}` : "";
+export async function listStockMovements(params: { productId?: string | null; q?: string } = {}): Promise<StockMovement[]> {
+  const sp = new URLSearchParams();
+  if (params.productId) sp.set("productId", params.productId);
+  if (params.q) sp.set("q", params.q);
+  const qs = sp.toString() ? `?${sp.toString()}` : "";
   return apiFetch(`/api/stock-movements${qs}`);
+}
+
+export async function voidStockMovement(id: string, voidReason?: string | null) {
+  return apiFetch<{ ok: boolean }>(`/api/stock-movements/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({ void_reason: voidReason ?? null }),
+  });
 }
 
 export async function createStockMovement(input: StockMovementInput) {

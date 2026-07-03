@@ -13,3 +13,4 @@
 - [Billing Query Keys](billing-query-keys.md) — useBilling y settings.tsx deben usar queryKey ["business_settings"]; /api/license/status usa ["/api/license/status"].
 - [Sale Edit & Void](sale-edit-void.md) — PUT+DELETE /api/sales/:id; columnas nuevas status/deletedAt/updatedAt; FOR UPDATE en sale; calcCurrentTotal filtra status='active'.
 - [Reconciliation Layer](reconciliation-layer.md) — recalculateCashSession + recalculateStock en server/lib/reconciliation.ts; wired en POST/PUT/DELETE sales y cash/close; initialStock en products; POST /api/admin/reconcile para backfill+repair.
+- [Payment Methods & Cash Impact](payment-methods-cash-impact.md) — sales: 5 payment cols + cashAmount; calculateCashImpact() clamps mixed to [0,total]; COALESCE(cash_amount,total) for legacy rows; sale_void protected same as sale/sale_edit.
