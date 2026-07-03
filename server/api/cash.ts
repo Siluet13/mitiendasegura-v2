@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { and, eq, sum } from "drizzle-orm";
+import { and, eq, sql, sum } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
@@ -9,9 +9,20 @@ import { logEvent } from "../lib/logger";
 import { recalculateCashSession } from "../lib/reconciliation";
 import { cashRegisterSessions, sales } from "@shared/schema";
 
+/**
+ * Calcula el total de ventas que impactan en caja para una sesión abierta.
+ *
+ * REGLA: solo la porción en efectivo cuenta.
+ *   cash / null (legacy) → sale.total completo
+ *   transfer / account   → 0
+ *   mixed                → sale.cash_amount (porción efectivo ya calculada)
+ *
+ * Usa COALESCE(cash_amount, total) para compatibilidad con ventas anteriores
+ * a la introducción del campo cash_amount (donde el valor es NULL → trata como efectivo).
+ */
 async function calcCurrentTotal(sessionId: string): Promise<number> {
   const [agg] = await db
-    .select({ total: sum(sales.total) })
+    .select({ total: sum(sql`COALESCE(${sales.cashAmount}, ${sales.total})`) })
     .from(sales)
     .where(and(eq(sales.cashSessionId, sessionId), eq(sales.status, "active")));
   return agg?.total ? Number(agg.total) : 0;
