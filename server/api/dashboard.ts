@@ -128,7 +128,7 @@ export function registerDashboardRoutes(app: Express): void {
   }));
 
   // ── GET /api/dashboard/recent-sales ───────────────────────────────────────
-  // Solo ventas activas, últimas 10, con método de pago.
+  // Solo ventas activas, últimas 10, con método de pago y nombre de cliente.
   app.get("/api/dashboard/recent-sales", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
@@ -139,12 +139,14 @@ export function registerDashboardRoutes(app: Express): void {
         createdAt:          sales.createdAt,
         total:              sales.total,
         paymentMethod:      sales.paymentMethod,
+        customerNombre:     customers.nombre,
         cantidad_productos: count(saleItems.id),
       })
       .from(sales)
       .leftJoin(saleItems, eq(saleItems.saleId, sales.id))
+      .leftJoin(customers, eq(sales.customerId, customers.id))
       .where(and(eq(sales.tenantId, tenantId), eq(sales.status, "active")))
-      .groupBy(sales.id, sales.createdAt, sales.total, sales.paymentMethod)
+      .groupBy(sales.id, sales.createdAt, sales.total, sales.paymentMethod, customers.nombre)
       .orderBy(desc(sales.createdAt))
       .limit(10);
 
@@ -154,7 +156,7 @@ export function registerDashboardRoutes(app: Express): void {
         created_at:         s.createdAt,
         total:              Number(s.total),
         payment_method:     s.paymentMethod ?? "cash",
-        cliente:            null as string | null,
+        cliente:            s.customerNombre ?? null,
         cantidad_productos: s.cantidad_productos ?? 0,
       }))
     );
@@ -239,12 +241,14 @@ export function registerDashboardRoutes(app: Express): void {
         createdAt:          sales.createdAt,
         total:              sales.total,
         paymentMethod:      sales.paymentMethod,
+        customerNombre:     customers.nombre,
         cantidad_productos: count(saleItems.id),
       })
         .from(sales)
         .leftJoin(saleItems, eq(saleItems.saleId, sales.id))
+        .leftJoin(customers, eq(sales.customerId, customers.id))
         .where(and(eq(sales.tenantId, tenantId), eq(sales.status, "active")))
-        .groupBy(sales.id, sales.createdAt, sales.total, sales.paymentMethod)
+        .groupBy(sales.id, sales.createdAt, sales.total, sales.paymentMethod, customers.nombre)
         .orderBy(desc(sales.createdAt))
         .limit(10),
       db.select({ createdAt: sales.createdAt, total: sales.total })
@@ -302,7 +306,7 @@ export function registerDashboardRoutes(app: Express): void {
         created_at:         s.createdAt,
         total:              Number(s.total),
         payment_method:     s.paymentMethod ?? "cash",
-        cliente:            null as string | null,
+        cliente:            s.customerNombre ?? null,
         cantidad_productos: s.cantidad_productos ?? 0,
       })),
       salesByDay: Array.from(dayMap.entries()).map(([fecha, total]) => ({ fecha, total })),

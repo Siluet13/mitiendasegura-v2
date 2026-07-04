@@ -118,7 +118,12 @@ export function registerInventoryRoutes(app: Express): void {
       .leftJoin(categories, eq(products.categoryId, categories.id))
       .where(eq(products.tenantId, tenantId))
       .orderBy(products.nombre);
-    res.json(rows.map((r) => ({ ...r, categories: r.categoryNombre ? { nombre: r.categoryNombre } : null })));
+    res.json(rows.map((r) => ({
+      ...r,
+      // Exponer ambas formas del campo para compatibilidad con frontend
+      stock_minimo: r.stockMinimo,
+      categories: r.categoryNombre ? { nombre: r.categoryNombre } : null,
+    })));
   }));
 
   app.post("/api/products", isAuthenticated, wrapAsync(async (req, res) => {

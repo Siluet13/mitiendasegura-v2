@@ -13,8 +13,20 @@ export interface ValidationResult<T> {
 
 function toNum(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
-  const n = Number(String(v).replace(",", ".").trim());
+  // Normalizar formato argentino/europeo: quitar $ y separador de miles (punto),
+  // convertir coma decimal a punto. Ej: "$1.500,00" → "1500.00"
+  const s = String(v)
+    .replace(/\$/g, "")      // quitar símbolo de moneda
+    .trim()
+    .replace(/\.(?=\d{3})/g, "")  // quitar puntos como separador de miles
+    .replace(",", ".");            // convertir coma decimal a punto
+  const n = Number(s);
   return isNaN(n) ? null : n;
+}
+
+/** Devuelve true si todas las propiedades de la fila son "" o null (fila en blanco) */
+function isBlankRow(row: Record<string, unknown>): boolean {
+  return Object.values(row).every((v) => v === null || v === undefined || v === "");
 }
 
 function toBool(v: unknown): boolean {
@@ -59,8 +71,11 @@ export function validateProducts(rows: RawProductRow[]): ValidationResult<ValidP
   let skipped = 0;
 
   for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
+    const row = rows[i] as Record<string, unknown>;
     const rowNum = i + 2;
+
+    // Saltar filas completamente en blanco (ej: filas vacías al final del Excel)
+    if (isBlankRow(row)) { skipped++; continue; }
 
     const nombre = String(row.nombre ?? "").trim();
     if (!nombre) {
@@ -68,9 +83,14 @@ export function validateProducts(rows: RawProductRow[]): ValidationResult<ValidP
       continue;
     }
 
+    // Distinguir "columna no mapeada" (undefined) de "valor inválido"
+    if (row.precio === undefined) {
+      errors.push({ row: rowNum, reason: "Columna 'Precio' no encontrada. Verificá que el archivo tenga una columna de precio." });
+      continue;
+    }
     const precio = toNum(row.precio);
     if (precio === null) {
-      errors.push({ row: rowNum, reason: `Precio inválido: "${row.precio}"` });
+      errors.push({ row: rowNum, reason: `Precio inválido: "${row.precio}" (debe ser un número, ej: 1500 o 1500.50)` });
       continue;
     }
     if (precio < 0) {

@@ -19,6 +19,19 @@ import { logEvent } from "../lib/logger";
 
 const MAX_RESTORE_ROWS = 100_000;
 
+/**
+ * Convierte cualquier valor de fecha (Date, string ISO, timestamp, null, undefined)
+ * a una cadena ISO 8601, o devuelve "" si el valor no es una fecha válida.
+ * Usar siempre en lugar de llamar .toISOString() directamente sobre campos de DB,
+ * porque Drizzle puede devolver strings en lugar de objetos Date.
+ */
+function safeISO(v: unknown): string {
+  if (!v) return "";
+  if (v instanceof Date) return isNaN(v.getTime()) ? "" : v.toISOString();
+  const d = new Date(v as string);
+  return isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
 function noTenant(res: any) {
   return res.status(500).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
 }
@@ -122,7 +135,7 @@ export function registerBackupRoutes(app: Express): void {
         "Activo": p.activo ? "SI" : "NO",
         "Categoría": catMap.get(p.categoryId ?? "") ?? "",
         "ID": p.id,
-        "Fecha Creación": p.createdAt.toISOString().slice(0, 10),
+        "Fecha Creación": safeISO(p.createdAt).slice(0, 10),
       }))),
       "Productos"
     );
@@ -132,7 +145,7 @@ export function registerBackupRoutes(app: Express): void {
       XLSX.utils.json_to_sheet(catsData.map((c) => ({
         "Nombre": c.nombre,
         "ID": c.id,
-        "Fecha Creación": c.createdAt.toISOString().slice(0, 10),
+        "Fecha Creación": safeISO(c.createdAt).slice(0, 10),
       }))),
       "Categorías"
     );
@@ -146,7 +159,7 @@ export function registerBackupRoutes(app: Express): void {
         "Dirección": c.direccion ?? "",
         "Observaciones": c.observaciones ?? "",
         "ID": c.id,
-        "Fecha Creación": c.createdAt.toISOString().slice(0, 10),
+        "Fecha Creación": safeISO(c.createdAt).slice(0, 10),
       }))),
       "Clientes"
     );
@@ -158,7 +171,7 @@ export function registerBackupRoutes(app: Express): void {
         "Total": s.total,
         "Cliente": custMap.get(s.customerId ?? "") ?? "",
         "Observación": s.observacion ?? "",
-        "Fecha": s.createdAt.toISOString().slice(0, 10),
+        "Fecha": safeISO(s.createdAt).slice(0, 10),
         "ID": s.id,
       }))),
       "Ventas"
@@ -174,7 +187,7 @@ export function registerBackupRoutes(app: Express): void {
         "Subtotal": si.subtotal,
         "ID Venta": si.saleId,
         "ID Producto": si.productId,
-        "Fecha": si.createdAt.toISOString().slice(0, 10),
+        "Fecha": safeISO(si.createdAt).slice(0, 10),
       }))),
       "Detalle de Ventas"
     );
@@ -186,7 +199,7 @@ export function registerBackupRoutes(app: Express): void {
         "Tipo": m.tipo,
         "Cantidad": m.cantidad,
         "Observación": m.observacion ?? "",
-        "Fecha": m.createdAt.toISOString().slice(0, 10),
+        "Fecha": safeISO(m.createdAt).slice(0, 10),
         "ID Producto": m.productId,
       }))),
       "Movimientos de Stock"
@@ -242,7 +255,7 @@ export function registerBackupRoutes(app: Express): void {
       salesData.map((s) => ({
         "N° Comprobante": s.receiptNumber ?? "", "Total": s.total,
         "Cliente": custMap.get(s.customerId ?? "") ?? "", "Observación": s.observacion ?? "",
-        "Fecha": s.createdAt.toISOString().slice(0, 10), "ID": s.id,
+        "Fecha": safeISO(s.createdAt).slice(0, 10), "ID": s.id,
       }))
     ));
 
@@ -259,7 +272,7 @@ export function registerBackupRoutes(app: Express): void {
       stockData.map((m) => ({
         "Producto": prodMap.get(m.productId) ?? "", "Tipo": m.tipo,
         "Cantidad": m.cantidad, "Observación": m.observacion ?? "",
-        "Fecha": m.createdAt.toISOString().slice(0, 10),
+        "Fecha": safeISO(m.createdAt).slice(0, 10),
       }))
     ));
 
