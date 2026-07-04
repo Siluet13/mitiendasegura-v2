@@ -93,7 +93,7 @@ function CashRegisterBar({
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["cash_session"] });
       setCloseModal(false);
-      toast.success(`Caja cerrada — Total ventas: ${fmt(data.current_total)}`);
+      toast.success(`Caja cerrada — Total cobrado: ${fmt(data.current_total)}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -120,7 +120,7 @@ function CashRegisterBar({
               <span className="tabular-nums font-bold">
                 {fmt(session!.current_total)}
               </span>{" "}
-              en ventas
+              cobrado
             </span>
           ) : (
             <span className="text-sm text-muted-foreground">Sin caja abierta</span>
@@ -180,19 +180,81 @@ function CashRegisterBar({
           <div className="py-2 space-y-2 text-sm text-muted-foreground">
             <p>¿Confirmás el cierre de caja?</p>
             {session && (
-              <div className="rounded-md border p-3 space-y-1 text-foreground">
-                <div className="flex justify-between">
+              <div className="rounded-md border p-3 space-y-1.5 text-foreground text-sm">
+                {/* Monto inicial */}
+                <div className="flex justify-between text-muted-foreground">
                   <span>Monto inicial</span>
-                  <span className="tabular-nums font-medium">{fmt(Number(session.initial_amount))}</span>
+                  <span className="tabular-nums">{fmt(Number(session.initial_amount))}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Ventas del turno</span>
-                  <span className="tabular-nums font-medium">{fmt(session.current_total)}</span>
+
+                {/* Desglose cobrado */}
+                <div className="border-t pt-1.5 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Efectivo</span>
+                    <span className="tabular-nums">{fmt(session.cash_total ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Transferencias</span>
+                    <span className="tabular-nums">{fmt(session.transfer_total ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span>Total cobrado</span>
+                    <span className="tabular-nums">{fmt(session.current_total)}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between border-t pt-1 font-semibold">
+
+                {/* Cuenta corriente (solo si hay) */}
+                {(session.account_total ?? 0) > 0 && (
+                  <div className="border-t pt-1 flex justify-between text-muted-foreground">
+                    <span>Cta. corriente</span>
+                    <span className="tabular-nums">{fmt(session.account_total ?? 0)}</span>
+                  </div>
+                )}
+
+                {/* Ventas brutas (si difiere del cobrado) */}
+                {(session.net_sales ?? 0) !== session.current_total && (
+                  <div className="flex justify-between text-muted-foreground text-xs">
+                    <span>Total ventas (bruto)</span>
+                    <span className="tabular-nums">{fmt(session.net_sales ?? 0)}</span>
+                  </div>
+                )}
+
+                {/* Total en caja final */}
+                <div className="border-t pt-1.5 flex justify-between font-bold text-base">
                   <span>Total en caja</span>
                   <span className="tabular-nums">{fmt(Number(session.initial_amount) + session.current_total)}</span>
                 </div>
+
+                {/* Cantidad de ventas por método */}
+                {session.sales_count > 0 && (
+                  <div className="border-t pt-1 text-xs text-muted-foreground space-y-0.5">
+                    <p className="font-medium">Ventas por método ({session.sales_count} total)</p>
+                    {(session.sales_by_payment_method?.cash ?? 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>Efectivo</span>
+                        <span>{session.sales_by_payment_method.cash}</span>
+                      </div>
+                    )}
+                    {(session.sales_by_payment_method?.transfer ?? 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>Transferencia</span>
+                        <span>{session.sales_by_payment_method.transfer}</span>
+                      </div>
+                    )}
+                    {(session.sales_by_payment_method?.account ?? 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>Cta. corriente</span>
+                        <span>{session.sales_by_payment_method.account}</span>
+                      </div>
+                    )}
+                    {(session.sales_by_payment_method?.mixed ?? 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>Mixto</span>
+                        <span>{session.sales_by_payment_method.mixed}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

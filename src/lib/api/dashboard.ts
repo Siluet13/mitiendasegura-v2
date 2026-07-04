@@ -7,11 +7,33 @@ async function apiFetch<T>(path: string): Promise<T> {
   return res.json();
 }
 
+/**
+ * KPIs del dashboard — solo ventas activas (status = 'active').
+ *
+ * salesToday / salesMonth  = ventas netas brutas (todos los métodos)
+ * cashToday / cashMonth    = solo efectivo
+ * transferToday / ...      = solo transferencias
+ * accountToday / ...       = cuenta corriente (no cobrado)
+ * collectedToday / ...     = efectivo + transferencias (lo que entró a caja)
+ */
 export interface DashboardKpis {
-  salesToday: number;
-  salesMonth: number;
-  activeProducts: number;
-  totalCustomers: number;
+  // Hoy
+  salesToday:      number;
+  cashToday:       number;
+  transferToday:   number;
+  accountToday:    number;
+  collectedToday:  number;
+  salesCountToday: number;
+  // Mes
+  salesMonth:      number;
+  cashMonth:       number;
+  transferMonth:   number;
+  accountMonth:    number;
+  collectedMonth:  number;
+  salesCountMonth: number;
+  // Otros
+  activeProducts:  number;
+  totalCustomers:  number;
 }
 
 export interface StockAlert {
@@ -21,7 +43,7 @@ export interface StockAlert {
 }
 
 export interface StockAlerts {
-  sinStock: StockAlert[];
+  sinStock:  StockAlert[];
   stockBajo: StockAlert[];
 }
 
@@ -36,6 +58,7 @@ export interface RecentSale {
   id: string;
   created_at: string;
   total: number;
+  payment_method: string;
   cliente: string | null;
   cantidad_productos: number;
 }

@@ -1,9 +1,20 @@
+/**
+ * Dashboard financiero para Mi Tienda Segura POS.
+ *
+ * REGLAS:
+ *   - Las ventas anuladas (status = 'void') se excluyen de TODOS los cálculos.
+ *   - Los KPIs financieros provienen de calculateSalesSummaryForRange() en
+ *     reconciliation.ts — misma fórmula que la caja, sin duplicar lógica.
+ *   - Caja e ingresos NO son lo mismo: se diferencian explícitamente.
+ */
+
 import type { Express } from "express";
 import { eq, and, gte, lt, desc, count, sum } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { wrapAsync } from "../lib/asyncHandler";
+import { calculateSalesSummaryForRange } from "../lib/reconciliation";
 import { products, customers, sales, saleItems } from "@shared/schema";
 
 function todayRange() {
@@ -31,19 +42,17 @@ function noTenant(res: any) {
 }
 
 export function registerDashboardRoutes(app: Express): void {
+
+  // ── GET /api/dashboard/kpis ───────────────────────────────────────────────
   app.get("/api/dashboard/kpis", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const { start, end } = todayRange();
     const mStart = monthStart();
 
-    const [todaySales, monthSales, activeProductsCount, customersCount] = await Promise.all([
-      db.select({ total: sales.total })
-        .from(sales)
-        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, start), lt(sales.createdAt, end))),
-      db.select({ total: sales.total })
-        .from(sales)
-        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, mStart))),
+    const [todayKpis, monthKpis, activeProductsCount, customersCount] = await Promise.all([
+      calculateSalesSummaryForRange(tenantId, and(gte(sales.createdAt, start), lt(sales.createdAt, end))),
+      calculateSalesSummaryForRange(tenantId, gte(sales.createdAt, mStart)),
       db.select({ count: count() })
         .from(products)
         .where(and(eq(products.tenantId, tenantId), eq(products.activo, true))),
@@ -53,13 +62,24 @@ export function registerDashboardRoutes(app: Express): void {
     ]);
 
     res.json({
-      salesToday: todaySales.reduce((s, r) => s + Number(r.total), 0),
-      salesMonth: monthSales.reduce((s, r) => s + Number(r.total), 0),
-      activeProducts: activeProductsCount[0]?.count ?? 0,
-      totalCustomers: customersCount[0]?.count ?? 0,
+      salesToday:        todayKpis.netSales,
+      cashToday:         todayKpis.cashTotal,
+      transferToday:     todayKpis.transferTotal,
+      accountToday:      todayKpis.accountTotal,
+      collectedToday:    todayKpis.collectedTotal,
+      salesCountToday:   todayKpis.salesCount,
+      salesMonth:        monthKpis.netSales,
+      cashMonth:         monthKpis.cashTotal,
+      transferMonth:     monthKpis.transferTotal,
+      accountMonth:      monthKpis.accountTotal,
+      collectedMonth:    monthKpis.collectedTotal,
+      salesCountMonth:   monthKpis.salesCount,
+      activeProducts:    activeProductsCount[0]?.count ?? 0,
+      totalCustomers:    customersCount[0]?.count ?? 0,
     });
   }));
 
+  // ── GET /api/dashboard/stock-alerts ───────────────────────────────────────
   app.get("/api/dashboard/stock-alerts", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
@@ -71,11 +91,13 @@ export function registerDashboardRoutes(app: Express): void {
 
     const alerts = rows.filter((p) => p.stock <= p.stockMinimo || p.stock === 0);
     res.json({
-      sinStock: alerts.filter((p) => p.stock === 0),
+      sinStock:  alerts.filter((p) => p.stock === 0),
       stockBajo: alerts.filter((p) => p.stock > 0 && p.stock <= p.stockMinimo),
     });
   }));
 
+  // ── GET /api/dashboard/top-products ───────────────────────────────────────
+  // Solo items de ventas activas (excluye ventas anuladas).
   app.get("/api/dashboard/top-products", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
@@ -83,14 +105,14 @@ export function registerDashboardRoutes(app: Express): void {
     const rows = await db
       .select({
         productId: saleItems.productId,
-        nombre: products.nombre,
-        unidades: sum(saleItems.cantidad).mapWith(Number),
-        importe: sum(saleItems.subtotal).mapWith(Number),
+        nombre:    products.nombre,
+        unidades:  sum(saleItems.cantidad).mapWith(Number),
+        importe:   sum(saleItems.subtotal).mapWith(Number),
       })
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
       .leftJoin(products, eq(saleItems.productId, products.id))
-      .where(eq(sales.tenantId, tenantId))
+      .where(and(eq(sales.tenantId, tenantId), eq(sales.status, "active")))
       .groupBy(saleItems.productId, products.nombre)
       .orderBy(desc(sum(saleItems.cantidad)))
       .limit(10);
@@ -98,42 +120,48 @@ export function registerDashboardRoutes(app: Express): void {
     res.json(
       rows.map((r) => ({
         product_id: r.productId,
-        nombre: r.nombre ?? "Producto eliminado",
-        unidades: r.unidades ?? 0,
-        importe: r.importe ?? 0,
+        nombre:     r.nombre ?? "Producto eliminado",
+        unidades:   r.unidades ?? 0,
+        importe:    r.importe ?? 0,
       }))
     );
   }));
 
+  // ── GET /api/dashboard/recent-sales ───────────────────────────────────────
+  // Solo ventas activas, últimas 10, con método de pago.
   app.get("/api/dashboard/recent-sales", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
 
     const rows = await db
       .select({
-        id: sales.id,
-        createdAt: sales.createdAt,
-        total: sales.total,
+        id:                 sales.id,
+        createdAt:          sales.createdAt,
+        total:              sales.total,
+        paymentMethod:      sales.paymentMethod,
         cantidad_productos: count(saleItems.id),
       })
       .from(sales)
       .leftJoin(saleItems, eq(saleItems.saleId, sales.id))
-      .where(eq(sales.tenantId, tenantId))
-      .groupBy(sales.id, sales.createdAt, sales.total)
+      .where(and(eq(sales.tenantId, tenantId), eq(sales.status, "active")))
+      .groupBy(sales.id, sales.createdAt, sales.total, sales.paymentMethod)
       .orderBy(desc(sales.createdAt))
       .limit(10);
 
     res.json(
       rows.map((s) => ({
-        id: s.id,
-        created_at: s.createdAt,
-        total: Number(s.total),
-        cliente: null as string | null,
+        id:                 s.id,
+        created_at:         s.createdAt,
+        total:              Number(s.total),
+        payment_method:     s.paymentMethod ?? "cash",
+        cliente:            null as string | null,
         cantidad_productos: s.cantidad_productos ?? 0,
       }))
     );
   }));
 
+  // ── GET /api/dashboard/sales-by-day ───────────────────────────────────────
+  // Solo ventas activas, últimos 7 días, total neto.
   app.get("/api/dashboard/sales-by-day", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
@@ -142,7 +170,11 @@ export function registerDashboardRoutes(app: Express): void {
     const rows = await db
       .select({ createdAt: sales.createdAt, total: sales.total })
       .from(sales)
-      .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, since)))
+      .where(and(
+        eq(sales.tenantId, tenantId),
+        eq(sales.status, "active"),
+        gte(sales.createdAt, since),
+      ))
       .orderBy(sales.createdAt);
 
     const map = new Map<string, number>();
@@ -158,6 +190,8 @@ export function registerDashboardRoutes(app: Express): void {
     res.json(Array.from(map.entries()).map(([fecha, total]) => ({ fecha, total })));
   }));
 
+  // ── GET /api/dashboard/all ─────────────────────────────────────────────────
+  // Endpoint combinado — devuelve todos los datos en una sola llamada.
   app.get("/api/dashboard/all", isAuthenticated, wrapAsync(async (req, res) => {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
@@ -166,8 +200,8 @@ export function registerDashboardRoutes(app: Express): void {
     const since = daysAgo(6);
 
     const [
-      todaySales,
-      monthSales,
+      todayKpis,
+      monthKpis,
       activeProductsCount,
       customersCount,
       stockRows,
@@ -175,12 +209,8 @@ export function registerDashboardRoutes(app: Express): void {
       recentSalesRows,
       salesByDayRows,
     ] = await Promise.all([
-      db.select({ total: sales.total })
-        .from(sales)
-        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, start), lt(sales.createdAt, end))),
-      db.select({ total: sales.total })
-        .from(sales)
-        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, mStart))),
+      calculateSalesSummaryForRange(tenantId, and(gte(sales.createdAt, start), lt(sales.createdAt, end))),
+      calculateSalesSummaryForRange(tenantId, gte(sales.createdAt, mStart)),
       db.select({ count: count() })
         .from(products)
         .where(and(eq(products.tenantId, tenantId), eq(products.activo, true))),
@@ -193,32 +223,37 @@ export function registerDashboardRoutes(app: Express): void {
         .orderBy(products.stock),
       db.select({
         productId: saleItems.productId,
-        nombre: products.nombre,
-        unidades: sum(saleItems.cantidad).mapWith(Number),
-        importe: sum(saleItems.subtotal).mapWith(Number),
+        nombre:    products.nombre,
+        unidades:  sum(saleItems.cantidad).mapWith(Number),
+        importe:   sum(saleItems.subtotal).mapWith(Number),
       })
         .from(saleItems)
         .innerJoin(sales, eq(saleItems.saleId, sales.id))
         .leftJoin(products, eq(saleItems.productId, products.id))
-        .where(eq(sales.tenantId, tenantId))
+        .where(and(eq(sales.tenantId, tenantId), eq(sales.status, "active")))
         .groupBy(saleItems.productId, products.nombre)
         .orderBy(desc(sum(saleItems.cantidad)))
         .limit(10),
       db.select({
-        id: sales.id,
-        createdAt: sales.createdAt,
-        total: sales.total,
+        id:                 sales.id,
+        createdAt:          sales.createdAt,
+        total:              sales.total,
+        paymentMethod:      sales.paymentMethod,
         cantidad_productos: count(saleItems.id),
       })
         .from(sales)
         .leftJoin(saleItems, eq(saleItems.saleId, sales.id))
-        .where(eq(sales.tenantId, tenantId))
-        .groupBy(sales.id, sales.createdAt, sales.total)
+        .where(and(eq(sales.tenantId, tenantId), eq(sales.status, "active")))
+        .groupBy(sales.id, sales.createdAt, sales.total, sales.paymentMethod)
         .orderBy(desc(sales.createdAt))
         .limit(10),
       db.select({ createdAt: sales.createdAt, total: sales.total })
         .from(sales)
-        .where(and(eq(sales.tenantId, tenantId), gte(sales.createdAt, since)))
+        .where(and(
+          eq(sales.tenantId, tenantId),
+          eq(sales.status, "active"),
+          gte(sales.createdAt, since),
+        ))
         .orderBy(sales.createdAt),
     ]);
 
@@ -237,26 +272,37 @@ export function registerDashboardRoutes(app: Express): void {
 
     res.json({
       kpis: {
-        salesToday: todaySales.reduce((s, r) => s + Number(r.total), 0),
-        salesMonth: monthSales.reduce((s, r) => s + Number(r.total), 0),
-        activeProducts: activeProductsCount[0]?.count ?? 0,
-        totalCustomers: customersCount[0]?.count ?? 0,
+        salesToday:        todayKpis.netSales,
+        cashToday:         todayKpis.cashTotal,
+        transferToday:     todayKpis.transferTotal,
+        accountToday:      todayKpis.accountTotal,
+        collectedToday:    todayKpis.collectedTotal,
+        salesCountToday:   todayKpis.salesCount,
+        salesMonth:        monthKpis.netSales,
+        cashMonth:         monthKpis.cashTotal,
+        transferMonth:     monthKpis.transferTotal,
+        accountMonth:      monthKpis.accountTotal,
+        collectedMonth:    monthKpis.collectedTotal,
+        salesCountMonth:   monthKpis.salesCount,
+        activeProducts:    activeProductsCount[0]?.count ?? 0,
+        totalCustomers:    customersCount[0]?.count ?? 0,
       },
       stockAlerts: {
-        sinStock: alerts.filter((p) => p.stock === 0),
+        sinStock:  alerts.filter((p) => p.stock === 0),
         stockBajo: alerts.filter((p) => p.stock > 0 && p.stock <= p.stockMinimo),
       },
       topProducts: topProductsRows.map((r) => ({
         product_id: r.productId,
-        nombre: r.nombre ?? "Producto eliminado",
-        unidades: r.unidades ?? 0,
-        importe: r.importe ?? 0,
+        nombre:     r.nombre ?? "Producto eliminado",
+        unidades:   r.unidades ?? 0,
+        importe:    r.importe ?? 0,
       })),
       recentSales: recentSalesRows.map((s) => ({
-        id: s.id,
-        created_at: s.createdAt,
-        total: Number(s.total),
-        cliente: null as string | null,
+        id:                 s.id,
+        created_at:         s.createdAt,
+        total:              Number(s.total),
+        payment_method:     s.paymentMethod ?? "cash",
+        cliente:            null as string | null,
         cantidad_productos: s.cantidad_productos ?? 0,
       })),
       salesByDay: Array.from(dayMap.entries()).map(([fecha, total]) => ({ fecha, total })),

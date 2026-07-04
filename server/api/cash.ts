@@ -1,34 +1,37 @@
 import type { Express } from "express";
-import { and, eq, sql, sum } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { wrapAsync } from "../lib/asyncHandler";
 import { broadcast } from "../lib/events";
 import { logEvent } from "../lib/logger";
-import { recalculateCashSession } from "../lib/reconciliation";
-import { cashRegisterSessions, sales } from "@shared/schema";
+import { calculateCashSummary, type CashSummary } from "../lib/reconciliation";
+import { cashRegisterSessions } from "@shared/schema";
 
 /**
- * Calcula el total de ventas que impactan en caja para una sesión abierta.
- *
- * REGLA: solo la porción en efectivo cuenta.
- *   cash / null (legacy) → sale.total completo
- *   transfer / account   → 0
- *   mixed                → sale.cash_amount (porción efectivo ya calculada)
- *
- * Usa COALESCE(cash_amount, total) para compatibilidad con ventas anteriores
- * a la introducción del campo cash_amount (donde el valor es NULL → trata como efectivo).
+ * Resumen vacío para sesiones sin ventas (evita undefined en la respuesta).
  */
-async function calcCurrentTotal(sessionId: string): Promise<number> {
-  const [agg] = await db
-    .select({ total: sum(sql`COALESCE(${sales.cashAmount}, ${sales.total})`) })
-    .from(sales)
-    .where(and(eq(sales.cashSessionId, sessionId), eq(sales.status, "active")));
-  return agg?.total ? Number(agg.total) : 0;
-}
+const EMPTY_SUMMARY: CashSummary = {
+  cashTotal: 0,
+  transferTotal: 0,
+  accountTotal: 0,
+  collectedTotal: 0,
+  netSales: 0,
+  salesCount: 0,
+  salesByPaymentMethod: { cash: 0, transfer: 0, account: 0, mixed: 0 },
+};
 
-function toResponse(session: typeof cashRegisterSessions.$inferSelect, currentTotal: number) {
+/**
+ * Construye la respuesta completa de la sesión incluyendo el resumen financiero.
+ *
+ * current_total = collectedTotal (efectivo + transferencias) para backward compat
+ * con el frontend que consume este campo para mostrar el total en caja.
+ */
+function toResponse(
+  session: typeof cashRegisterSessions.$inferSelect,
+  summary: CashSummary,
+) {
   return {
     id: session.id,
     tenant_id: session.tenantId,
@@ -39,7 +42,14 @@ function toResponse(session: typeof cashRegisterSessions.$inferSelect, currentTo
     final_amount: session.finalAmount,
     total_sales: session.totalSales,
     status: session.status,
-    current_total: currentTotal,
+    // Resumen financiero completo (fuente: calculateCashSummary)
+    current_total: summary.collectedTotal,        // efectivo + transferencias
+    cash_total: summary.cashTotal,                // solo efectivo
+    transfer_total: summary.transferTotal,        // solo transferencias
+    account_total: summary.accountTotal,          // cuenta corriente (no entra a caja)
+    net_sales: summary.netSales,                  // total bruto de todas las ventas activas
+    sales_count: summary.salesCount,
+    sales_by_payment_method: summary.salesByPaymentMethod,
   };
 }
 
@@ -55,6 +65,10 @@ function logCashError(endpoint: string, label: string, err: any): void {
 }
 
 export function registerCashRoutes(app: Express): void {
+
+  // ── GET /api/cash/current ──────────────────────────────────────────────────
+  // Devuelve la sesión abierta del usuario con resumen financiero completo.
+  // Usa calculateCashSummary() como única fuente de verdad financiera.
   app.get("/api/cash/current", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     console.log("[cash] GET /current — userId:", userId, "tenantId:", tenantId ?? "null");
@@ -79,18 +93,24 @@ export function registerCashRoutes(app: Express): void {
 
     if (!session) return res.json(null);
 
-    let currentTotal = 0;
+    let summary: CashSummary;
     try {
-      currentTotal = await calcCurrentTotal(session.id);
-      console.log("[cash] GET /current — total calculado:", currentTotal);
+      summary = await calculateCashSummary(session.id, tenantId);
+      console.log(
+        "[cash] GET /current — cobrado:", summary.collectedTotal,
+        "efectivo:", summary.cashTotal,
+        "transferencia:", summary.transferTotal,
+        "cta.cte:", summary.accountTotal,
+      );
     } catch (err: any) {
-      logCashError("GET /current", "calcCurrentTotal", err);
+      logCashError("GET /current", "calculateCashSummary", err);
       throw err;
     }
 
-    res.json(toResponse(session, currentTotal));
+    res.json(toResponse(session, summary));
   }));
 
+  // ── POST /api/cash/open ────────────────────────────────────────────────────
   app.post("/api/cash/open", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     console.log("[cash] POST /open — userId:", userId, "tenantId:", tenantId ?? "null");
@@ -130,21 +150,23 @@ export function registerCashRoutes(app: Express): void {
 
     broadcast(tenantId, { type: "invalidate", entities: ["cash_session"] });
     logEvent({ module: "cash", event: "CASH_OPENED", message: "Caja abierta", userId, ownerId: userId, tenantId, details: { sessionId: session.id, initialAmount } });
-    res.json(toResponse(session, 0));
+    res.json(toResponse(session, EMPTY_SUMMARY));
   }));
 
+  // ── POST /api/cash/close ───────────────────────────────────────────────────
+  // Cierra la sesión y retorna resumen financiero completo para mostrar al usuario.
+  // Usa calculateCashSummary() dentro de la transacción para garantizar consistencia.
   app.post("/api/cash/close", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId, tenantId } = requireTenant(req);
     console.log("[cash] POST /close — userId:", userId, "tenantId:", tenantId ?? "null");
     if (!tenantId) return res.status(400).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
 
     let closed: typeof cashRegisterSessions.$inferSelect;
-    let totalSales: number;
+    let closeSummary: CashSummary;
 
     try {
-      // Wrap in a transaction so the reconciliation and the status update are atomic.
-      // FOR UPDATE on the session prevents concurrent closes.
-      [closed, totalSales] = await db.transaction(async (tx) => {
+      // Transacción atómica con FOR UPDATE para prevenir cierres concurrentes.
+      [closed, closeSummary] = await db.transaction(async (tx) => {
         const [session] = await tx
           .select()
           .from(cashRegisterSessions)
@@ -160,17 +182,27 @@ export function registerCashRoutes(app: Express): void {
 
         console.log("[cash] POST /close — sesión encontrada:", session.id);
 
-        // Recalculate totalSales from source of truth inside the transaction
-        const total = await recalculateCashSession(session.id, tenantId, tx);
-        console.log("[cash] POST /close — totalSales (recalculado):", total);
+        // Calcular resumen financiero completo desde la fuente de verdad (sales)
+        const summary = await calculateCashSummary(session.id, tenantId, tx);
+        const collectedTotal = summary.collectedTotal;
 
+        console.log(
+          "[cash] POST /close — cobrado:", collectedTotal,
+          "efectivo:", summary.cashTotal,
+          "transferencia:", summary.transferTotal,
+          "cta.cte:", summary.accountTotal,
+          "ventas brutas:", summary.netSales,
+          "cant. ventas:", summary.salesCount,
+        );
+
+        // Actualizar sesión: cerrar + guardar totales
         const [result] = await tx
           .update(cashRegisterSessions)
           .set({
             status: "closed",
             closedAt: new Date(),
-            totalSales: String(total),
-            finalAmount: String(Number(session.initialAmount) + total),
+            totalSales: String(collectedTotal),
+            finalAmount: String(Number(session.initialAmount) + collectedTotal),
           })
           .where(and(
             eq(cashRegisterSessions.id, session.id),
@@ -179,7 +211,7 @@ export function registerCashRoutes(app: Express): void {
           .returning();
 
         console.log("[cash] POST /close — caja cerrada:", result.id, "finalAmount:", result.finalAmount);
-        return [result, total] as const;
+        return [result, summary] as const;
       });
     } catch (err: any) {
       logCashError("POST /close", "transaction", err);
@@ -188,7 +220,25 @@ export function registerCashRoutes(app: Express): void {
     }
 
     broadcast(tenantId, { type: "invalidate", entities: ["cash_session"] });
-    logEvent({ module: "cash", event: "CASH_CLOSED", message: "Caja cerrada", userId, ownerId: userId, tenantId, details: { sessionId: closed.id, totalSales, finalAmount: Number(closed.finalAmount) } });
-    res.json(toResponse(closed, totalSales));
+    logEvent({
+      module: "cash",
+      event: "CASH_CLOSED",
+      message: "Caja cerrada",
+      userId,
+      ownerId: userId,
+      tenantId,
+      details: {
+        sessionId: closed.id,
+        cashTotal: closeSummary.cashTotal,
+        transferTotal: closeSummary.transferTotal,
+        accountTotal: closeSummary.accountTotal,
+        collectedTotal: closeSummary.collectedTotal,
+        netSales: closeSummary.netSales,
+        salesCount: closeSummary.salesCount,
+        finalAmount: Number(closed.finalAmount),
+      },
+    });
+
+    res.json(toResponse(closed, closeSummary));
   }));
 }

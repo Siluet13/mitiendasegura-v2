@@ -24,6 +24,22 @@ function formatDate(iso: string): string {
   });
 }
 
+/** Etiqueta + color para cada método de pago */
+function PaymentBadge({ method }: { method: string }) {
+  const map: Record<string, { label: string; className: string }> = {
+    cash:     { label: "Efectivo",   className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+    transfer: { label: "Transfer.",  className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+    account:  { label: "Cta.cte.",   className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+    mixed:    { label: "Mixto",      className: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400" },
+  };
+  const { label, className } = map[method] ?? map["cash"];
+  return (
+    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${className}`}>
+      {label}
+    </span>
+  );
+}
+
 export function RecentSales() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["dashboard", "recent-sales"],
@@ -36,7 +52,7 @@ export function RecentSales() {
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <Clock className="h-4 w-4 text-primary" />
-          Actividad reciente — Últimas 10 ventas
+          Actividad reciente — Últimas 10 ventas activas
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
@@ -61,6 +77,7 @@ export function RecentSales() {
                     <th className="text-left px-4 py-2 font-medium text-muted-foreground">Fecha</th>
                     <th className="text-left px-4 py-2 font-medium text-muted-foreground">Cliente</th>
                     <th className="text-right px-4 py-2 font-medium text-muted-foreground">Productos</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">Método</th>
                     <th className="text-right px-4 py-2 font-medium text-muted-foreground">Total</th>
                   </tr>
                 </thead>
@@ -81,6 +98,9 @@ export function RecentSales() {
                         <Badge variant="secondary" className="text-xs">
                           {s.cantidad_productos} {s.cantidad_productos === 1 ? "ítem" : "ítems"}
                         </Badge>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <PaymentBadge method={s.payment_method ?? "cash"} />
                       </td>
                       <td className="px-4 py-2.5 text-right font-medium tabular-nums text-primary">
                         {formatCurrency(s.total)}
