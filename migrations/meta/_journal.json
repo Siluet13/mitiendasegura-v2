@@ -8,6 +8,13 @@
       "when": 1781643625741,
       "tag": "0000_cold_lifeguard",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783553623401,
+      "tag": "0001_heavy_colonel_america",
+      "breakpoints": true
     }
   ]
 }
