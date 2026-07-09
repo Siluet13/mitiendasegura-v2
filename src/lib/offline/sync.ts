@@ -5,6 +5,7 @@ import {
   createCustomer,
   createProduct,
   createSale,
+  ConflictError,
   type CustomerInput,
   type ProductInput,
   type SaleItemInput,
@@ -144,22 +145,28 @@ async function syncSales(
       log("SALE_CREATE_SYNCED", { id: op.id, itemCount: p.items?.length });
       synced++;
     } catch (e) {
-      await safeUpdateStatus(op.id, "pending");
-      const errMsg = e instanceof Error ? e.message : String(e);
-      const errStack = e instanceof Error ? (e.stack ?? null) : null;
-      log(
-        "SALE_SYNC_ERROR",
-        {
-          id: op.id,
-          error: errMsg,
-          stack: errStack,
-          items: p.items,
-          client_id: p.client_id,
-          customer_id: p.customer_id ?? null,
-        },
-        "error",
-      );
-      failed++;
+      if (e instanceof ConflictError) {
+        await dequeue(op.id);
+        log("SALE_SYNC_ALREADY_EXISTS", { id: op.id, client_id: p.client_id });
+        synced++;
+      } else {
+        await safeUpdateStatus(op.id, "pending");
+        const errMsg = e instanceof Error ? e.message : String(e);
+        const errStack = e instanceof Error ? (e.stack ?? null) : null;
+        log(
+          "SALE_SYNC_ERROR",
+          {
+            id: op.id,
+            error: errMsg,
+            stack: errStack,
+            items: p.items,
+            client_id: p.client_id,
+            customer_id: p.customer_id ?? null,
+          },
+          "error",
+        );
+        failed++;
+      }
     }
   }
   if (synced > 0) {

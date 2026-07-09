@@ -224,7 +224,7 @@ export async function createSale(input: {
       customer_id: input.customer_id,
       client_id: input.client_id ?? null,
     }),
-    timeoutMs: 3000,
+    timeoutMs: 10000,
   });
 }
 
