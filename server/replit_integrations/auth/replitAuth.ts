@@ -18,6 +18,34 @@ const getOidcConfig = memoize(
   { maxAge: 3600 * 1000 }
 );
 
+/**
+ * Returns the public-facing domain for this Repl.
+ *
+ * WHY: When the app runs behind the Vite dev proxy (changeOrigin: true),
+ * Express receives Host: localhost:5001, so req.hostname = "localhost".
+ * That makes callbackURL = "https://localhost/api/callback" — rejected by
+ * Replit's OIDC server as an invalid redirect URI.
+ *
+ * REPLIT_DOMAINS is injected automatically by Replit for every Repl and
+ * every Remix. It always contains the current repl's accessible domains,
+ * so it is fully portable across accounts, projects, and deployments.
+ *
+ * Priority order:
+ *   1. REPLIT_DOMAINS  — dev preview & deployed domains (portable, automatic)
+ *   2. REPLIT_DEV_DOMAIN — dev-only fallback
+ *   3. req.hostname    — last resort (works when no proxy, e.g. production direct)
+ */
+function getAppDomain(req: any): string {
+  const domains = process.env.REPLIT_DOMAINS;
+  if (domains) {
+    const first = domains.split(",")[0].trim();
+    if (first) return first;
+  }
+  const devDomain = process.env.REPLIT_DEV_DOMAIN;
+  if (devDomain) return devDomain.trim();
+  return req.hostname;
+}
+
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000;
   const pgStore = connectPg(session);
@@ -100,38 +128,42 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {
-    ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
+    const domain = getAppDomain(req);
+    ensureStrategy(domain);
+    passport.authenticate(`replitauth:${domain}`, {
       prompt: "login consent",
       scope: ["openid", "email", "profile", "offline_access"],
     })(req, res, next);
   });
 
   app.get("/api/callback", (req, res, next) => {
-    ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
+    const domain = getAppDomain(req);
+    ensureStrategy(domain);
+    passport.authenticate(`replitauth:${domain}`, {
       successReturnToOrRedirect: "/dashboard",
       failureRedirect: "/api/login",
     })(req, res, next);
   });
 
   app.get("/api/logout", (req, res) => {
+    const domain = getAppDomain(req);
     req.logout(() => {
       res.redirect(
         client.buildEndSessionUrl(config, {
           client_id: process.env.REPL_ID!,
-          post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
+          post_logout_redirect_uri: `https://${domain}`,
         }).href
       );
     });
   });
 
   app.get("/api/logout-switch", (req, res) => {
+    const domain = getAppDomain(req);
     req.logout(() => {
       res.redirect(
         client.buildEndSessionUrl(config, {
           client_id: process.env.REPL_ID!,
-          post_logout_redirect_uri: `${req.protocol}://${req.hostname}/api/login`,
+          post_logout_redirect_uri: `https://${domain}/api/login`,
         }).href
       );
     });
