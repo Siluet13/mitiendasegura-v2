@@ -18,9 +18,13 @@ export function unsubscribe(tenantId: string, res: SseClient): void {
   if (clients.size === 0) connections.delete(tenantId);
 }
 
+export type BroadcastPayload =
+  | { type: "invalidate"; entities: string[] }
+  | { type: "stock_alert"; kind: string; productId: string; productName: string; stock: number; stockMinimo: number; metadata?: Record<string, unknown> };
+
 export function broadcast(
   tenantId: string,
-  payload: { type: string; entities: string[] }
+  payload: BroadcastPayload,
 ): void {
   const clients = connections.get(tenantId);
   if (!clients || clients.size === 0) return;

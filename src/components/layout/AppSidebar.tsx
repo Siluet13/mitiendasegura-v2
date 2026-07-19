@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
+  AlertTriangle,
   ArrowLeftRight,
   Bug,
   Building2,
@@ -15,6 +16,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
+import { useStockAlertCount } from "@/hooks/useStockAlertCount";
 import {
   Sidebar,
   SidebarContent,
@@ -39,6 +41,7 @@ const items = [
   { title: "Movimientos", url: "/stock-movements", icon: ArrowLeftRight },
   { title: "Ventas", url: "/sales", icon: ShoppingCart },
   { title: "Clientes", url: "/customers", icon: Users },
+  { title: "Alertas", url: "/stock-alerts", icon: AlertTriangle },
   { title: "Configuración", url: "/settings", icon: Settings },
   { title: "Backup", url: "/backup", icon: Database },
 ] as const;
@@ -52,6 +55,7 @@ export function AppSidebar() {
   const { user } = useAuth();
   const isOnline = useOnlineStatus();
   const { total } = usePendingOps();
+  const alertCount = useStockAlertCount();
   const currentPath = useRouterState({ select: (s) => s.location.pathname });
 
   return (
@@ -72,6 +76,9 @@ export function AppSidebar() {
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
+                  {item.url === "/stock-alerts" && alertCount > 0 && (
+                    <SidebarMenuBadge>{alertCount > 99 ? "99+" : alertCount}</SidebarMenuBadge>
+                  )}
                 </SidebarMenuItem>
               ))}
               <SidebarMenuItem>

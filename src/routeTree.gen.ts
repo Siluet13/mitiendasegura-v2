@@ -20,6 +20,7 @@ import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminOfflineDebugRouteImport } from './routes/admin/offline-debug'
 import { Route as AdminDevRouteImport } from './routes/admin/dev'
 import { Route as AuthenticatedStockMovementsRouteImport } from './routes/_authenticated/stock-movements'
+import { Route as AuthenticatedStockAlertsRouteImport } from './routes/_authenticated/stock-alerts'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedSalesRouteImport } from './routes/_authenticated/sales'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
@@ -84,6 +85,12 @@ const AuthenticatedStockMovementsRoute =
     path: '/stock-movements',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedStockAlertsRoute =
+  AuthenticatedStockAlertsRouteImport.update({
+    id: '/stock-alerts',
+    path: '/stock-alerts',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -140,6 +147,7 @@ export interface FileRoutesByFullPath {
   '/products': typeof AuthenticatedProductsRoute
   '/sales': typeof AuthenticatedSalesRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/stock-alerts': typeof AuthenticatedStockAlertsRoute
   '/stock-movements': typeof AuthenticatedStockMovementsRoute
   '/admin/dev': typeof AdminDevRoute
   '/admin/offline-debug': typeof AdminOfflineDebugRoute
@@ -159,6 +167,7 @@ export interface FileRoutesByTo {
   '/products': typeof AuthenticatedProductsRoute
   '/sales': typeof AuthenticatedSalesRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/stock-alerts': typeof AuthenticatedStockAlertsRoute
   '/stock-movements': typeof AuthenticatedStockMovementsRoute
   '/admin/dev': typeof AdminDevRoute
   '/admin/offline-debug': typeof AdminOfflineDebugRoute
@@ -181,6 +190,7 @@ export interface FileRoutesById {
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/sales': typeof AuthenticatedSalesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/stock-alerts': typeof AuthenticatedStockAlertsRoute
   '/_authenticated/stock-movements': typeof AuthenticatedStockMovementsRoute
   '/admin/dev': typeof AdminDevRoute
   '/admin/offline-debug': typeof AdminOfflineDebugRoute
@@ -203,6 +213,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/sales'
     | '/settings'
+    | '/stock-alerts'
     | '/stock-movements'
     | '/admin/dev'
     | '/admin/offline-debug'
@@ -222,6 +233,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/sales'
     | '/settings'
+    | '/stock-alerts'
     | '/stock-movements'
     | '/admin/dev'
     | '/admin/offline-debug'
@@ -243,6 +255,7 @@ export interface FileRouteTypes {
     | '/_authenticated/products'
     | '/_authenticated/sales'
     | '/_authenticated/settings'
+    | '/_authenticated/stock-alerts'
     | '/_authenticated/stock-movements'
     | '/admin/dev'
     | '/admin/offline-debug'
@@ -338,6 +351,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedStockMovementsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/stock-alerts': {
+      id: '/_authenticated/stock-alerts'
+      path: '/stock-alerts'
+      fullPath: '/stock-alerts'
+      preLoaderRoute: typeof AuthenticatedStockAlertsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/settings': {
       id: '/_authenticated/settings'
       path: '/settings'
@@ -406,6 +426,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedSalesRoute: typeof AuthenticatedSalesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedStockAlertsRoute: typeof AuthenticatedStockAlertsRoute
   AuthenticatedStockMovementsRoute: typeof AuthenticatedStockMovementsRoute
 }
 
@@ -418,6 +439,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedSalesRoute: AuthenticatedSalesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedStockAlertsRoute: AuthenticatedStockAlertsRoute,
   AuthenticatedStockMovementsRoute: AuthenticatedStockMovementsRoute,
 }
 

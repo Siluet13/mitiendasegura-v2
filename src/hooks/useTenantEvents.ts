@@ -1,13 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-
-const ENTITY_KEYS: Record<string, string[]> = {
-  products: "products",
-  sales: "sales",
-  customers: "customers",
-  categories: "categories",
-  stock_movements: "stock_movements",
-} as unknown as Record<string, string[]>;
+import { toast } from "sonner";
 
 export function useTenantEvents(): void {
   const qc = useQueryClient();
@@ -27,10 +20,40 @@ export function useTenantEvents(): void {
           const payload = JSON.parse(event.data as string) as {
             type: string;
             entities?: string[];
+            kind?: string;
+            productName?: string;
+            stock?: number;
+            stockMinimo?: number;
           };
-          if (payload.type !== "invalidate" || !Array.isArray(payload.entities)) return;
-          for (const entity of payload.entities) {
-            qc.invalidateQueries({ queryKey: [entity] });
+
+          // ── Cache invalidation ──────────────────────────────────────────
+          if (payload.type === "invalidate" && Array.isArray(payload.entities)) {
+            for (const entity of payload.entities) {
+              qc.invalidateQueries({ queryKey: [entity] });
+            }
+            // Si se invalidan productos, también refrescar el conteo de alertas
+            if (payload.entities.includes("products")) {
+              qc.invalidateQueries({ queryKey: ["stock_alerts"] });
+            }
+            return;
+          }
+
+          // ── Notificaciones de alerta de stock ───────────────────────────
+          if (payload.type === "stock_alert" && payload.productName) {
+            const name = payload.productName;
+            switch (payload.kind) {
+              case "sin_stock":
+                toast.error(`${name} quedó sin stock.`, { duration: 6000 });
+                break;
+              case "stock_bajo":
+                toast.warning(`${name} alcanzó el stock mínimo.`, { duration: 6000 });
+                break;
+              case "recuperado":
+                toast.success(`${name} volvió a tener stock disponible.`, { duration: 5000 });
+                // Refrescar alertas activas
+                qc.invalidateQueries({ queryKey: ["stock_alerts"] });
+                break;
+            }
           }
         } catch {}
       };

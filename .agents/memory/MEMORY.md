@@ -18,3 +18,4 @@
 - [Financial Architecture](financial-architecture.md) — Single source of truth: calculateCashSummary() + calculateSalesSummaryForRange() in reconciliation.ts; caja = cash + transfer (NOT account); all modules must use these functions, never duplicate SQL logic.
 - [Cash Register Bug — calcCurrentTotal](cash-current-total-bug.md) — RESUELTO en refactorización financiera: toda la lógica migrada a calculateCashSummary(); dashboard KPIs también corregidos (filtro voided + desglose por método).
 - [Cuenta Corriente Phase 1](cuenta-corriente-phase1.md) — customer_accounts table (balance), require customer_id for "account" payment, adjustCustomerAccountBalance helper in inventory.ts.
+- [Stock Alert System](stock-alerts.md) — no persistent table; state computed from products.stock+stockMinimo; evaluateStockAlerts() pure fn; pendingAlerts pattern for transactions.

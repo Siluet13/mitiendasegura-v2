@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { eq, and, desc, ilike, or, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
 import { calculateCashImpact, recalculateCashSession, recalculateStock } from "../lib/reconciliation";
+import { evaluateStockAlerts, broadcastStockAlert } from "../lib/stockAlerts";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
 import { broadcast } from "../lib/events";
@@ -222,6 +223,12 @@ export function registerInventoryRoutes(app: Express): void {
       }
     }
 
+    // Pre-leer stock anterior para detectar cambio de estado de alerta
+    const [oldProdForAlert] = await db
+      .select({ nombre: products.nombre, stock: products.stock, stockMinimo: products.stockMinimo })
+      .from(products)
+      .where(and(eq(products.id, id), eq(products.tenantId, tenantId)));
+
     const [row] = await db
       .update(products)
       .set({
@@ -241,6 +248,10 @@ export function registerInventoryRoutes(app: Express): void {
       .returning();
     if (!row) return res.status(404).json({ message: "No encontrado" });
     res.json(toProductResponse(row));
+    if (oldProdForAlert) {
+      const prodEditAlert = evaluateStockAlerts(id, oldProdForAlert.nombre, oldProdForAlert.stock, row.stock, row.stockMinimo);
+      if (prodEditAlert) broadcastStockAlert(tenantId, prodEditAlert);
+    }
     broadcast(tenantId, { type: "invalidate", entities: ["products"] });
   }));
 
@@ -536,6 +547,8 @@ export function registerInventoryRoutes(app: Express): void {
       return res.status(400).json({ message: "Cuenta corriente requiere seleccionar un cliente" });
     }
 
+    const editStockAlerts: ReturnType<typeof evaluateStockAlerts>[] = [];
+
     try {
       const updated = await db.transaction(async (tx) => {
         // 1. Cargar venta con row-level lock para serializar ediciones concurrentes
@@ -587,10 +600,12 @@ export function registerInventoryRoutes(app: Express): void {
             .for("update");
           if (!prod) continue; // producto eliminado, omitir
 
+          const newStockRevert = prod.stock + oldItem.cantidad;
           await tx
             .update(products)
-            .set({ stock: prod.stock + oldItem.cantidad, updatedAt: new Date() })
+            .set({ stock: newStockRevert, updatedAt: new Date() })
             .where(and(eq(products.id, oldItem.productId), eq(products.tenantId, tenantId)));
+          editStockAlerts.push(evaluateStockAlerts(oldItem.productId, prod.nombre, prod.stock, newStockRevert, prod.stockMinimo));
 
           await tx.insert(stockMovements).values({
             ownerId: userId,
@@ -641,10 +656,12 @@ export function registerInventoryRoutes(app: Express): void {
             subtotal: String(subtotal),
           });
 
+          const newStockEdit = prod.stock - cantidad;
           await tx
             .update(products)
-            .set({ stock: prod.stock - cantidad, updatedAt: new Date() })
+            .set({ stock: newStockEdit, updatedAt: new Date() })
             .where(and(eq(products.id, product_id), eq(products.tenantId, tenantId)));
+          editStockAlerts.push(evaluateStockAlerts(product_id, prod.nombre, prod.stock, newStockEdit, prod.stockMinimo));
 
           await tx.insert(stockMovements).values({
             ownerId: userId,
@@ -723,6 +740,7 @@ export function registerInventoryRoutes(app: Express): void {
       });
 
       res.json(updated);
+      for (const a of editStockAlerts) if (a) broadcastStockAlert(tenantId, a);
       broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements", "cash_session"] });
     } catch (err: any) {
       const status = err?.status === 404 ? 404 : err?.status === 400 ? 400 : 500;
@@ -734,6 +752,7 @@ export function registerInventoryRoutes(app: Express): void {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
+    const voidStockAlerts: ReturnType<typeof evaluateStockAlerts>[] = [];
 
     try {
       await db.transaction(async (tx) => {
@@ -783,10 +802,12 @@ export function registerInventoryRoutes(app: Express): void {
             .for("update");
           if (!prod) continue;
 
+          const newStockVoid = prod.stock + item.cantidad;
           await tx
             .update(products)
-            .set({ stock: prod.stock + item.cantidad, updatedAt: new Date() })
+            .set({ stock: newStockVoid, updatedAt: new Date() })
             .where(and(eq(products.id, item.productId), eq(products.tenantId, tenantId)));
+          voidStockAlerts.push(evaluateStockAlerts(item.productId, prod.nombre, prod.stock, newStockVoid, prod.stockMinimo));
 
           await tx.insert(stockMovements).values({
             ownerId: userId,
@@ -818,6 +839,7 @@ export function registerInventoryRoutes(app: Express): void {
       });
 
       res.json({ ok: true });
+      for (const a of voidStockAlerts) if (a) broadcastStockAlert(tenantId, a);
       broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements", "cash_session"] });
     } catch (err: any) {
       const status = err?.status === 404 ? 404 : err?.status === 400 ? 400 : 500;
@@ -871,6 +893,9 @@ export function registerInventoryRoutes(app: Express): void {
     if (payment_method === "account" && !customer_id) {
       return res.status(400).json({ message: "Cuenta corriente requiere seleccionar un cliente" });
     }
+
+    // Acumula notificaciones de cambio de estado de stock (se emiten tras el commit)
+    const saleStockAlerts: ReturnType<typeof evaluateStockAlerts>[] = [];
 
     try {
       const result = await db.transaction(async (tx) => {
@@ -943,10 +968,12 @@ export function registerInventoryRoutes(app: Express): void {
             subtotal: String(subtotal),
           });
 
+          const newStockSale = prod.stock - cantidad;
           await tx
             .update(products)
-            .set({ stock: prod.stock - cantidad, updatedAt: new Date() })
+            .set({ stock: newStockSale, updatedAt: new Date() })
             .where(eq(products.id, product_id));
+          saleStockAlerts.push(evaluateStockAlerts(product_id, prod.nombre, prod.stock, newStockSale, prod.stockMinimo));
 
           await tx.insert(stockMovements).values({
             ownerId: userId,
@@ -1012,12 +1039,42 @@ export function registerInventoryRoutes(app: Express): void {
       });
 
       res.json(result);
+      for (const a of saleStockAlerts) if (a) broadcastStockAlert(tenantId, a);
       broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements", "cash_session"] });
     } catch (err: any) {
       const status = (err as any).status === 400 ? 400 : 500;
       const message = err?.message ?? "Error al registrar la venta";
       res.status(status).json({ message });
     }
+  }));
+
+  // ── Centro de Alertas de Stock ────────────────────────────────────────────
+  // Calcula el estado en tiempo real desde products.stock y products.stock_minimo.
+  // Sin tabla adicional — el inventario es la única fuente de verdad.
+  app.get("/api/stock-alerts", isAuthenticated, wrapAsync(async (req, res) => {
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
+
+    const rows = await db
+      .select({
+        id: products.id,
+        nombre: products.nombre,
+        sku: products.sku,
+        stock: products.stock,
+        stockMinimo: products.stockMinimo,
+      })
+      .from(products)
+      .where(and(eq(products.tenantId, tenantId), eq(products.activo, true)))
+      .orderBy(products.stock);
+
+    const sinStock = rows
+      .filter((p) => p.stock <= 0)
+      .map((p) => ({ ...p, estado: "sin_stock" as const }));
+    const stockBajo = rows
+      .filter((p) => p.stock > 0 && p.stockMinimo > 0 && p.stock <= p.stockMinimo)
+      .map((p) => ({ ...p, estado: "stock_bajo" as const }));
+
+    res.json({ sinStock, stockBajo, total: sinStock.length + stockBajo.length });
   }));
 
   // ── Stock Movements ───────────────────────────────────────────────────────
@@ -1081,6 +1138,8 @@ export function registerInventoryRoutes(app: Express): void {
     const id = String(req.params.id);
     const { void_reason } = req.body ?? {};
 
+    let delMvAlert: ReturnType<typeof evaluateStockAlerts> = null;
+
     await db.transaction(async (tx) => {
       const [mv] = await tx
         .select()
@@ -1100,15 +1159,26 @@ export function registerInventoryRoutes(app: Express): void {
         );
       }
 
+      // Pre-leer stock antes de recalcular para detectar cambio de estado
+      const [prodBefore] = await tx
+        .select({ nombre: products.nombre, stock: products.stock, stockMinimo: products.stockMinimo })
+        .from(products)
+        .where(and(eq(products.id, mv.productId), eq(products.tenantId, tenantId)));
+
       await tx
         .update(stockMovements)
         .set({ voidedAt: new Date(), voidedBy: userId, voidReason: void_reason ?? null })
         .where(and(eq(stockMovements.id, id), eq(stockMovements.tenantId, tenantId)));
 
-      await recalculateStock(mv.productId, tenantId, tx);
+      const newStockCalc = await recalculateStock(mv.productId, tenantId, tx);
+
+      if (prodBefore) {
+        delMvAlert = evaluateStockAlerts(mv.productId, prodBefore.nombre, prodBefore.stock, newStockCalc, prodBefore.stockMinimo);
+      }
     });
 
     res.json({ ok: true });
+    if (delMvAlert) broadcastStockAlert(tenantId, delMvAlert);
     broadcast(tenantId, { type: "invalidate", entities: ["stock_movements", "products"] });
   }));
 
@@ -1138,6 +1208,8 @@ export function registerInventoryRoutes(app: Express): void {
 
     const newStock = tipo === "entrada" ? prod.stock + cantidad : prod.stock - cantidad;
     await db.update(products).set({ stock: newStock, updatedAt: new Date() }).where(eq(products.id, product_id));
+    const mvAlert = evaluateStockAlerts(product_id, prod.nombre, prod.stock, newStock, prod.stockMinimo);
+    if (mvAlert) broadcastStockAlert(tenantId, mvAlert);
 
     res.json(mv);
     broadcast(tenantId, { type: "invalidate", entities: ["stock_movements", "products"] });

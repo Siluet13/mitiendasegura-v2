@@ -1,24 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, XCircle } from "lucide-react";
+import { AlertTriangle, XCircle, ArrowRight } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getStockAlerts } from "@/lib/api/dashboard";
+import { getStockAlerts } from "@/lib/api/stockAlerts";
 
 export function StockAlerts() {
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["dashboard", "stock-alerts"],
+    queryKey: ["stock_alerts"],
     queryFn: getStockAlerts,
     staleTime: 60_000,
   });
 
   return (
     <Card className="col-span-1 md:col-span-2">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-base flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-amber-500" />
           Alertas de Stock
         </CardTitle>
+        <Button variant="ghost" size="sm" asChild className="text-xs text-muted-foreground gap-1 h-7 px-2">
+          <Link to="/stock-alerts">
+            Ver todas
+            <ArrowRight className="h-3 w-3" />
+          </Link>
+        </Button>
       </CardHeader>
       <CardContent>
         {isError && (
@@ -62,7 +70,7 @@ export function StockAlerts() {
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle className="h-4 w-4 text-amber-500" />
-                <span className="text-sm font-semibold">Stock bajo (≤ 5)</span>
+                <span className="text-sm font-semibold">Stock bajo</span>
                 <Badge
                   className="ml-auto text-xs bg-amber-100 text-amber-800 hover:bg-amber-100"
                 >
