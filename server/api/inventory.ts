@@ -11,6 +11,7 @@ import {
   products,
   customers,
   customerAccounts,
+  customerAccountMovements,
   sales,
   saleItems,
   stockMovements,
@@ -28,9 +29,15 @@ async function adjustCustomerAccountBalance(
   tenantId: string,
   delta: number,
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  movement?: {
+    type: "sale" | "payment" | "sale_void" | "sale_edit" | "adjustment";
+    referenceId?: string | null;
+    referenceType?: string | null;
+    observacion?: string | null;
+  },
 ) {
   if (delta === 0) return;
-  await tx
+  const [updated] = await tx
     .insert(customerAccounts)
     .values({
       tenantId,
@@ -44,7 +51,21 @@ async function adjustCustomerAccountBalance(
         balance: sql`${customerAccounts.balance} + ${String(delta)}`,
         updatedAt: new Date(),
       },
+    })
+    .returning({ balance: customerAccounts.balance });
+
+  if (movement) {
+    await tx.insert(customerAccountMovements).values({
+      tenantId,
+      customerId,
+      type: movement.type,
+      referenceId: movement.referenceId ?? null,
+      referenceType: movement.referenceType ?? null,
+      amount: String(delta),
+      balanceAfter: updated?.balance ?? "0",
+      observacion: movement.observacion ?? null,
     });
+  }
 }
 
 function noTenant(res: any) {
@@ -259,11 +280,108 @@ export function registerInventoryRoutes(app: Express): void {
     const { tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const rows = await db
-      .select()
+      .select({
+        id: customers.id,
+        ownerId: customers.ownerId,
+        tenantId: customers.tenantId,
+        nombre: customers.nombre,
+        telefono: customers.telefono,
+        email: customers.email,
+        direccion: customers.direccion,
+        observaciones: customers.observaciones,
+        createdAt: customers.createdAt,
+        updatedAt: customers.updatedAt,
+        balance: customerAccounts.balance,
+      })
       .from(customers)
+      .leftJoin(
+        customerAccounts,
+        and(
+          eq(customerAccounts.customerId, customers.id),
+          eq(customerAccounts.tenantId, tenantId),
+        ),
+      )
       .where(eq(customers.tenantId, tenantId))
       .orderBy(customers.nombre);
     res.json(rows);
+  }));
+
+  app.get("/api/customers/:id/account", isAuthenticated, wrapAsync(async (req, res) => {
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
+
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)));
+    if (!customer) return res.status(404).json({ message: "Cliente no encontrado" });
+
+    const [account] = await db
+      .select({ balance: customerAccounts.balance, updatedAt: customerAccounts.updatedAt })
+      .from(customerAccounts)
+      .where(and(eq(customerAccounts.customerId, id), eq(customerAccounts.tenantId, tenantId)));
+
+    const movements = await db
+      .select()
+      .from(customerAccountMovements)
+      .where(and(eq(customerAccountMovements.customerId, id), eq(customerAccountMovements.tenantId, tenantId)))
+      .orderBy(desc(customerAccountMovements.createdAt));
+
+    res.json({
+      customer,
+      balance: account?.balance ?? "0",
+      movements,
+    });
+  }));
+
+  app.post("/api/customers/:id/payment", isAuthenticated, wrapAsync(async (req, res) => {
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
+    const id = String(req.params.id);
+    const { amount, observacion } = req.body;
+
+    const amountNum = Number(amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ message: "El importe debe ser mayor a cero" });
+    }
+
+    try {
+      await db.transaction(async (tx) => {
+        const [cust] = await tx
+          .select({ id: customers.id })
+          .from(customers)
+          .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)));
+        if (!cust) throw Object.assign(new Error("Cliente no encontrado"), { status: 404 });
+
+        const [account] = await tx
+          .select({ balance: customerAccounts.balance })
+          .from(customerAccounts)
+          .where(and(eq(customerAccounts.customerId, id), eq(customerAccounts.tenantId, tenantId)))
+          .for("update");
+
+        const currentBalance = Number(account?.balance ?? 0);
+        if (amountNum > currentBalance + 0.001) {
+          throw Object.assign(
+            new Error(`El pago (${amountNum.toFixed(2)}) supera el saldo pendiente (${currentBalance.toFixed(2)})`),
+            { status: 400 },
+          );
+        }
+
+        await adjustCustomerAccountBalance(id, tenantId, -amountNum, tx, {
+          type: "payment",
+          referenceId: null,
+          referenceType: "payment",
+          observacion: (observacion as string | undefined)?.trim() || null,
+        });
+      });
+
+      res.json({ ok: true });
+      broadcast(tenantId, { type: "invalidate", entities: ["customer_accounts", "customers"] });
+    } catch (err: any) {
+      const status = err?.status === 404 ? 404 : err?.status === 400 ? 400 : 500;
+      res.status(status).json({ message: err?.message ?? "Error al registrar pago" });
+    }
   }));
 
   app.post("/api/customers", isAuthenticated, wrapAsync(async (req, res) => {
@@ -579,10 +697,19 @@ export function registerInventoryRoutes(app: Express): void {
 
         // Cuenta corriente: ajustar saldo (revertir anterior, aplicar nuevo)
         if (oldAccountCredit) {
-          await adjustCustomerAccountBalance(oldAccountCredit.customerId, tenantId, -oldAccountCredit.amount, tx);
+          await adjustCustomerAccountBalance(oldAccountCredit.customerId, tenantId, -oldAccountCredit.amount, tx, {
+            type: "sale_edit",
+            referenceId: id,
+            referenceType: "sale",
+            observacion: "Edición de venta (reverso)",
+          });
         }
         if (pmNorm === "account" && result.customerId && creditAmountVal) {
-          await adjustCustomerAccountBalance(result.customerId, tenantId, Number(creditAmountVal), tx);
+          await adjustCustomerAccountBalance(result.customerId, tenantId, Number(creditAmountVal), tx, {
+            type: "sale_edit",
+            referenceId: id,
+            referenceType: "sale",
+          });
         }
 
         // Phase 4 — anti-drift: reconcile cash session total after edit
@@ -674,7 +801,12 @@ export function registerInventoryRoutes(app: Express): void {
 
         // Cuenta corriente: revertir saldo pendiente al anular
         if (sale.paymentMethod === "account" && sale.customerId && sale.creditAmount) {
-          await adjustCustomerAccountBalance(sale.customerId, tenantId, -Number(sale.creditAmount), tx);
+          await adjustCustomerAccountBalance(sale.customerId, tenantId, -Number(sale.creditAmount), tx, {
+            type: "sale_void",
+            referenceId: id,
+            referenceType: "sale",
+            observacion: "Anulación de venta",
+          });
         }
 
         // Phase 4 — anti-drift: reconcile cash session total after void
@@ -862,7 +994,11 @@ export function registerInventoryRoutes(app: Express): void {
 
         // Cuenta corriente: registrar saldo pendiente del cliente
         if (pmNorm === "account" && customer_id) {
-          await adjustCustomerAccountBalance(customer_id, tenantId, total, tx);
+          await adjustCustomerAccountBalance(customer_id, tenantId, total, tx, {
+            type: "sale",
+            referenceId: newSale.id,
+            referenceType: "sale",
+          });
         }
 
         // Phase 4 — anti-drift: reconcile cash session total after each sale

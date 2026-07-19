@@ -159,10 +159,31 @@ export const customerAccounts = pgTable("customer_accounts", {
   uniqueIndex("customer_accounts_tenant_customer_idx").on(t.tenantId, t.customerId),
 ]);
 
+// ── Historial de movimientos de cuenta corriente ─────────────────────────────
+// Registra cada débito (venta fiada) y crédito (pago) para trazabilidad.
+// amount > 0 = deuda nueva; amount < 0 = saldo reducido.
+export const customerAccountMovements = pgTable("customer_account_movements", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: uuid("tenant_id").notNull(),
+  customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  // 'sale' | 'payment' | 'sale_void' | 'sale_edit' | 'adjustment'
+  type: text("type").notNull(),
+  referenceId: uuid("reference_id"),
+  referenceType: text("reference_type"),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  balanceAfter: numeric("balance_after", { precision: 12, scale: 2 }).notNull(),
+  observacion: text("observacion"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("cam_tenant_id_idx").on(t.tenantId),
+  index("cam_customer_id_idx").on(t.customerId),
+]);
+
 export type Category = typeof categories.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type CustomerAccount = typeof customerAccounts.$inferSelect;
+export type CustomerAccountMovement = typeof customerAccountMovements.$inferSelect;
 export type Sale = typeof sales.$inferSelect;
 export type SaleItem = typeof saleItems.$inferSelect;
 export type StockMovement = typeof stockMovements.$inferSelect;

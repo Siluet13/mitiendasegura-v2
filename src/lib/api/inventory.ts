@@ -43,6 +43,26 @@ export type Customer = {
   observaciones: string | null;
   createdAt: string;
   updatedAt: string;
+  balance?: string | null; // saldo de cuenta corriente (de customer_accounts via LEFT JOIN)
+};
+
+export type CustomerAccountMovement = {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  type: "sale" | "payment" | "sale_void" | "sale_edit" | "adjustment";
+  referenceId: string | null;
+  referenceType: string | null;
+  amount: string;
+  balanceAfter: string;
+  observacion: string | null;
+  createdAt: string;
+};
+
+export type CustomerAccountData = {
+  customer: Customer;
+  balance: string;
+  movements: CustomerAccountMovement[];
 };
 
 export type Sale = {
@@ -209,6 +229,21 @@ export async function updateCustomer(id: string, input: CustomerInput, knownUpda
 
 export async function deleteCustomer(id: string) {
   return apiFetch(`/api/customers/${id}`, { method: "DELETE" });
+}
+
+export async function getCustomerAccount(id: string): Promise<CustomerAccountData> {
+  return apiFetch(`/api/customers/${id}/account`, { timeoutMs: 8000 });
+}
+
+export async function registerCustomerPayment(
+  id: string,
+  input: { amount: number; observacion?: string | null },
+): Promise<{ ok: boolean }> {
+  return apiFetch(`/api/customers/${id}/payment`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: 8000,
+  });
 }
 
 // ── Sales ─────────────────────────────────────────────────────────────────────
