@@ -664,6 +664,9 @@ function NewSaleDialog({
   const mut = useMutation({
     mutationFn: async (values: { observacion?: string }) => {
       if (lines.length === 0) throw new Error("La venta no puede estar vacía");
+      if (paymentMethod === "account" && customerId === NO_CUSTOMER) {
+        throw new Error("Cuenta corriente requiere seleccionar un cliente");
+      }
       const clientId = crypto.randomUUID();
       // Calcular montos según método de pago
       const cashPortion = paymentMethod === "mixed" && paidAmount ? Math.max(0, Number(paidAmount)) : 0;
@@ -824,7 +827,11 @@ function NewSaleDialog({
             <div className="space-y-1">
               <Label className="flex items-center gap-1.5">
                 <User className="h-3.5 w-3.5 text-muted-foreground" />
-                Cliente (opcional)
+                {paymentMethod === "account" ? (
+                  <span className="text-destructive font-medium">Cliente <span className="text-xs">(requerido para Cta. cte.)</span></span>
+                ) : (
+                  "Cliente (opcional)"
+                )}
                 <Kbd>F4</Kbd>
               </Label>
               <Select value={customerId} onValueChange={setCustomerId}>
@@ -1266,6 +1273,9 @@ function EditSaleDialog({
     mutationFn: async (values: { observacion?: string }) => {
       if (!saleId) throw new Error("No hay venta para editar");
       if (lines.length === 0) throw new Error("La venta no puede estar vacía");
+      if (paymentMethod === "account" && customerId === NO_CUSTOMER) {
+        throw new Error("Cuenta corriente requiere seleccionar un cliente");
+      }
       const cashPortion = paymentMethod === "mixed" && paidAmount ? Math.max(0, Number(paidAmount)) : 0;
       const transferPortion = paymentMethod === "mixed"
         ? Math.max(0, total - cashPortion)
@@ -1336,7 +1346,12 @@ function EditSaleDialog({
               <div className="space-y-1">
                 <Label className="flex items-center gap-1.5">
                   <User className="h-3.5 w-3.5 text-muted-foreground" />
-                  Cliente (opcional) <Kbd>F4</Kbd>
+                  {paymentMethod === "account" ? (
+                    <span className="text-destructive font-medium">Cliente <span className="text-xs">(requerido para Cta. cte.)</span></span>
+                  ) : (
+                    "Cliente (opcional)"
+                  )}
+                  <Kbd>F4</Kbd>
                 </Label>
                 <Select value={customerId} onValueChange={setCustomerId}>
                   <SelectTrigger ref={customerTriggerRef}>

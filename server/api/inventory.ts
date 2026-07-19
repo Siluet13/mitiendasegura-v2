@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { eq, and, desc, ilike, or, isNull } from "drizzle-orm";
+import { eq, and, desc, ilike, or, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
 import { calculateCashImpact, recalculateCashSession, recalculateStock } from "../lib/reconciliation";
 import { isAuthenticated } from "../replit_integrations/auth";
@@ -10,12 +10,42 @@ import {
   categories,
   products,
   customers,
+  customerAccounts,
   sales,
   saleItems,
   stockMovements,
   receiptSettings,
   cashRegisterSessions,
 } from "@shared/schema";
+
+/**
+ * Ajusta el saldo de cuenta corriente de un cliente dentro de una transacción.
+ * delta > 0  → el cliente debe más (nueva deuda)
+ * delta < 0  → el cliente debe menos (anulación o pago)
+ */
+async function adjustCustomerAccountBalance(
+  customerId: string,
+  tenantId: string,
+  delta: number,
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+) {
+  if (delta === 0) return;
+  await tx
+    .insert(customerAccounts)
+    .values({
+      tenantId,
+      customerId,
+      balance: String(delta),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [customerAccounts.tenantId, customerAccounts.customerId],
+      set: {
+        balance: sql`${customerAccounts.balance} + ${String(delta)}`,
+        updatedAt: new Date(),
+      },
+    });
+}
 
 function noTenant(res: any) {
   return res.status(500).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
@@ -380,6 +410,11 @@ export function registerInventoryRoutes(app: Express): void {
         return res.status(400).json({ message: "Monto en efectivo inválido para pago mixto" });
       }
     }
+    // Cuenta corriente requiere cliente
+    const effectiveEditPm = payment_method !== undefined ? payment_method : undefined;
+    if (effectiveEditPm === "account" && !customer_id) {
+      return res.status(400).json({ message: "Cuenta corriente requiere seleccionar un cliente" });
+    }
 
     try {
       const updated = await db.transaction(async (tx) => {
@@ -520,6 +555,12 @@ export function registerInventoryRoutes(app: Express): void {
           : sale.transferAmount;
         const cashImpact = calculateCashImpact({ total, paymentMethod: pmNorm, paidAmount: paidAmountVal });
 
+        // Cuenta corriente: capturar estado anterior ANTES de actualizar
+        const oldAccountCredit =
+          sale.paymentMethod === "account" && sale.customerId && sale.creditAmount
+            ? { customerId: sale.customerId, amount: Number(sale.creditAmount) }
+            : null;
+
         const [result] = await tx
           .update(sales)
           .set({
@@ -535,6 +576,14 @@ export function registerInventoryRoutes(app: Express): void {
           })
           .where(and(eq(sales.id, id), eq(sales.tenantId, tenantId)))
           .returning();
+
+        // Cuenta corriente: ajustar saldo (revertir anterior, aplicar nuevo)
+        if (oldAccountCredit) {
+          await adjustCustomerAccountBalance(oldAccountCredit.customerId, tenantId, -oldAccountCredit.amount, tx);
+        }
+        if (pmNorm === "account" && result.customerId && creditAmountVal) {
+          await adjustCustomerAccountBalance(result.customerId, tenantId, Number(creditAmountVal), tx);
+        }
 
         // Phase 4 — anti-drift: reconcile cash session total after edit
         if (sale.cashSessionId) {
@@ -623,6 +672,11 @@ export function registerInventoryRoutes(app: Express): void {
           });
         }
 
+        // Cuenta corriente: revertir saldo pendiente al anular
+        if (sale.paymentMethod === "account" && sale.customerId && sale.creditAmount) {
+          await adjustCustomerAccountBalance(sale.customerId, tenantId, -Number(sale.creditAmount), tx);
+        }
+
         // Phase 4 — anti-drift: reconcile cash session total after void
         if (sale.cashSessionId) {
           await recalculateCashSession(sale.cashSessionId, tenantId, tx);
@@ -678,6 +732,10 @@ export function registerInventoryRoutes(app: Express): void {
       if (!Number.isFinite(pa) || pa < 0) {
         return res.status(400).json({ message: "Monto en efectivo inválido para pago mixto" });
       }
+    }
+    // Cuenta corriente requiere cliente
+    if (payment_method === "account" && !customer_id) {
+      return res.status(400).json({ message: "Cuenta corriente requiere seleccionar un cliente" });
     }
 
     try {
@@ -801,6 +859,11 @@ export function registerInventoryRoutes(app: Express): void {
             cashAmount: String(cashImpact),
           })
           .where(eq(sales.id, newSale.id));
+
+        // Cuenta corriente: registrar saldo pendiente del cliente
+        if (pmNorm === "account" && customer_id) {
+          await adjustCustomerAccountBalance(customer_id, tenantId, total, tx);
+        }
 
         // Phase 4 — anti-drift: reconcile cash session total after each sale
         if (activeSession?.id) {

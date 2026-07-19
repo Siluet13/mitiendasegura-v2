@@ -144,9 +144,25 @@ export const businessSettings = pgTable("business_settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// ── Cuenta Corriente ──────────────────────────────────────────────────────────
+// Una fila por cliente por tenant. balance > 0 = el cliente debe dinero.
+// Se incrementa al crear una venta con payment_method='account' y
+// se decrementa al anular/editar dicha venta. Los pagos (Fase 2) la decrementarán.
+export const customerAccounts = pgTable("customer_accounts", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: uuid("tenant_id").notNull(),
+  customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  balance: numeric("balance", { precision: 12, scale: 2 }).notNull().default("0"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("customer_accounts_tenant_id_idx").on(t.tenantId),
+  uniqueIndex("customer_accounts_tenant_customer_idx").on(t.tenantId, t.customerId),
+]);
+
 export type Category = typeof categories.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
+export type CustomerAccount = typeof customerAccounts.$inferSelect;
 export type Sale = typeof sales.$inferSelect;
 export type SaleItem = typeof saleItems.$inferSelect;
 export type StockMovement = typeof stockMovements.$inferSelect;
