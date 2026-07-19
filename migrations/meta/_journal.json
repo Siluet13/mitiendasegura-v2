@@ -8,6 +8,34 @@
       "when": 1781643625741,
       "tag": "0000_cold_lifeguard",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781643700000,
+      "tag": "0001_sales_client_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781643760000,
+      "tag": "0002_billing_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781643820000,
+      "tag": "0003_customer_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781643880000,
+      "tag": "0004_customer_account_movements",
+      "breakpoints": true
     }
   ]
 }
