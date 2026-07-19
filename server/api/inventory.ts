@@ -173,6 +173,8 @@ export function registerInventoryRoutes(app: Express): void {
       ...r,
       // Exponer ambas formas del campo para compatibilidad con frontend
       stock_minimo: r.stockMinimo,
+      category_id: r.categoryId,       // alias snake_case para compatibilidad con frontend
+      codigo_barras: r.codigoBarras,   // alias snake_case para compatibilidad con frontend
       categories: r.categoryNombre ? { nombre: r.categoryNombre } : null,
     })));
   }));

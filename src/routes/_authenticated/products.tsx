@@ -363,6 +363,7 @@ function ProductsPage() {
           </DialogHeader>
           <form onSubmit={form.handleSubmit((v) => handleSave(v, knownUpdatedAt))} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {/* ── Nombre ──────────────────────────────────────────────── */}
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="nombre">Nombre</Label>
                 <Input id="nombre" {...form.register("nombre")} autoFocus />
@@ -370,14 +371,8 @@ function ProductsPage() {
                   <p className="text-sm text-destructive">{form.formState.errors.nombre.message}</p>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="sku">SKU</Label>
-                <Input id="sku" {...form.register("sku")} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="codigo_barras">Código de barras</Label>
-                <Input id="codigo_barras" {...form.register("codigo_barras")} />
-              </div>
+
+              {/* ── Categoría ───────────────────────────────────────────── */}
               <div className="space-y-2 sm:col-span-2">
                 <Label>Categoría</Label>
                 <Select
@@ -393,6 +388,8 @@ function ProductsPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* ── Costo / Precio ───────────────────────────────────────── */}
               <div className="space-y-2">
                 <Label htmlFor="costo">Costo</Label>
                 <Input id="costo" type="number" step="0.01" min="0" {...form.register("costo")} />
@@ -407,6 +404,8 @@ function ProductsPage() {
                   <p className="text-sm text-destructive">{form.formState.errors.precio.message}</p>
                 )}
               </div>
+
+              {/* ── Stock ────────────────────────────────────────────────── */}
               <div className="space-y-2">
                 <Label htmlFor="stock">Stock</Label>
                 <Input id="stock" type="number" min="0" {...form.register("stock")} />
@@ -415,10 +414,14 @@ function ProductsPage() {
                 <Label htmlFor="stock_minimo">Stock mínimo</Label>
                 <Input id="stock_minimo" type="number" min="0" {...form.register("stock_minimo")} />
               </div>
+
+              {/* ── Descripción ──────────────────────────────────────────── */}
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="descripcion">Descripción</Label>
                 <Textarea id="descripcion" rows={3} {...form.register("descripcion")} />
               </div>
+
+              {/* ── Activo ───────────────────────────────────────────────── */}
               <div className="flex items-center gap-2 sm:col-span-2">
                 <Switch
                   id="activo"
@@ -426,6 +429,19 @@ function ProductsPage() {
                   onCheckedChange={(c) => form.setValue("activo", c)}
                 />
                 <Label htmlFor="activo">Activo</Label>
+              </div>
+
+              {/* ── SKU / Código de barras — al final para lector ────────── */}
+              {/* El lector envía el código + Enter. Al estar al final,      */}
+              {/* el Enter del lector actúa como submit cuando ya se        */}
+              {/* completaron todos los demás campos.                       */}
+              <div className="space-y-2">
+                <Label htmlFor="sku">SKU</Label>
+                <Input id="sku" {...form.register("sku")} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="codigo_barras">Código de barras</Label>
+                <Input id="codigo_barras" {...form.register("codigo_barras")} />
               </div>
             </div>
             <DialogFooter>
