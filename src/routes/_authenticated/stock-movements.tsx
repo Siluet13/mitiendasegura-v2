@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { ArrowDownToLine, ArrowUpFromLine, Ban, Plus, Search } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Ban, Plus, Search, X } from "lucide-react";
 import {
   createStockMovement,
   listProducts,
@@ -14,6 +14,8 @@ import {
   type StockMovementInput,
 } from "@/lib/api/inventory";
 import { log } from "@/lib/offline/logger";
+import { ProductPicker } from "@/components/products/ProductPicker";
+import type { ProductSearchResult } from "@/components/products/ProductPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,14 +79,23 @@ const defaults: FormValues = {
 
 function StockMovementsPage() {
   const qc = useQueryClient();
+
+  // ── Estado de filtros del historial ────────────────────────────────────────
   const [filterProduct, setFilterProduct] = useState<string>(ALL);
+  const [filterTipo, setFilterTipo] = useState<string>(ALL);
+  const [fechaDesde, setFechaDesde] = useState("");
+  const [fechaHasta, setFechaHasta] = useState("");
   const [searchText, setSearchText] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Estado del formulario ──────────────────────────────────────────────────
   const [open, setOpen] = useState(false);
   const [voidingId, setVoidingId] = useState<string | null>(null);
+  // Clave para resetear el ProductPicker al reabrir el dialog
+  const [pickerKey, setPickerKey] = useState(0);
 
-  // Debounce the search text → debouncedQ drives the query
+  // Debounce del texto de búsqueda del historial
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
@@ -95,16 +106,21 @@ function StockMovementsPage() {
     };
   }, [searchText]);
 
+  // ── Productos (solo para el dropdown de filtro del historial) ──────────────
   const { data: products = [] } = useQuery({
     queryKey: ["products"],
     queryFn: listProducts,
   });
 
+  // ── Movimientos (historial) ────────────────────────────────────────────────
   const { data: movements = [], isLoading } = useQuery({
-    queryKey: ["stock_movements", filterProduct, debouncedQ],
+    queryKey: ["stock_movements", filterProduct, filterTipo, fechaDesde, fechaHasta, debouncedQ],
     queryFn: () =>
       listStockMovements({
         productId: filterProduct === ALL ? null : filterProduct,
+        tipo: filterTipo === ALL ? null : (filterTipo as "entrada" | "salida"),
+        fechaDesde: fechaDesde || null,
+        fechaHasta: fechaHasta || null,
         q: debouncedQ || undefined,
       }),
   });
@@ -129,6 +145,7 @@ function StockMovementsPage() {
         status: saveMut.status,
       });
     form.reset(defaults);
+    setPickerKey((k) => k + 1); // fuerza reset del ProductPicker
     setOpen(true);
   }
 
@@ -191,6 +208,22 @@ function StockMovementsPage() {
     referenciaTipo === "sale_edit" ||
     referenciaTipo === "sale_void";
 
+  // Limpiar todos los filtros del historial
+  const hasActiveFilters =
+    filterProduct !== ALL ||
+    filterTipo !== ALL ||
+    fechaDesde !== "" ||
+    fechaHasta !== "" ||
+    searchText !== "";
+
+  function clearFilters() {
+    setFilterProduct(ALL);
+    setFilterTipo(ALL);
+    setFechaDesde("");
+    setFechaHasta("");
+    setSearchText("");
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -200,35 +233,83 @@ function StockMovementsPage() {
         </Button>
       </div>
 
-      {/* ── Filtros ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-8"
-            placeholder="Buscar por nombre, SKU, cód. barras o categoría…"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-          />
+      {/* ── Filtros del historial ───────────────────────────────────────────── */}
+      <div className="space-y-2">
+        {/* Fila 1: búsqueda de texto + filtro por producto */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              placeholder="Buscar por producto, observación, código de barras o SKU…"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+          </div>
+          <div className="sm:w-56">
+            <Select value={filterProduct} onValueChange={setFilterProduct}>
+              <SelectTrigger>
+                <SelectValue placeholder="Filtrar por producto" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Todos los productos</SelectItem>
+                {products.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className="sm:w-64">
-          <Select value={filterProduct} onValueChange={setFilterProduct}>
-            <SelectTrigger>
-              <SelectValue placeholder="Filtrar por producto" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todos los productos</SelectItem>
-              {products.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.nombre}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+        {/* Fila 2: tipo + rango de fechas + botón limpiar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="w-40">
+            <Select value={filterTipo} onValueChange={setFilterTipo}>
+              <SelectTrigger>
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Todos los tipos</SelectItem>
+                <SelectItem value="entrada">Entrada</SelectItem>
+                <SelectItem value="salida">Salida</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1">
+            <Label className="shrink-0 text-sm text-muted-foreground">Desde</Label>
+            <Input
+              type="date"
+              className="w-38"
+              value={fechaDesde}
+              onChange={(e) => setFechaDesde(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <Label className="shrink-0 text-sm text-muted-foreground">Hasta</Label>
+            <Input
+              type="date"
+              className="w-38"
+              value={fechaHasta}
+              onChange={(e) => setFechaHasta(e.target.value)}
+            />
+          </div>
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearFilters}
+              className="gap-1 text-muted-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+              Limpiar filtros
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* ── Tabla ───────────────────────────────────────────────────────── */}
+      {/* ── Tabla de movimientos ────────────────────────────────────────────── */}
       <div className="rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
@@ -245,7 +326,7 @@ function StockMovementsPage() {
             {isLoading ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
-                  Cargando...
+                  Cargando…
                 </TableCell>
               </TableRow>
             ) : movements.length === 0 ? (
@@ -315,7 +396,7 @@ function StockMovementsPage() {
         </Table>
       </div>
 
-      {/* ── Nuevo movimiento ─────────────────────────────────────────────── */}
+      {/* ── Nuevo movimiento ─────────────────────────────────────────────────── */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -332,28 +413,18 @@ function StockMovementsPage() {
             })}
             className="space-y-4"
           >
+            {/* ── Selector inteligente de producto ──────────────────────────── */}
             <div className="space-y-2">
               <Label>Producto</Label>
-              <Select
-                value={form.watch("product_id") || undefined}
-                onValueChange={(v) =>
-                  form.setValue("product_id", v, { shouldValidate: true })
+              <ProductPicker
+                key={pickerKey}
+                value={form.watch("product_id")}
+                onSelect={(p: ProductSearchResult) =>
+                  form.setValue("product_id", p.id, { shouldValidate: true })
                 }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar producto" />
-                </SelectTrigger>
-                <SelectContent>
-                  {products.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.nombre}{" "}
-                      <span className="text-xs text-muted-foreground">
-                        · stock {p.stock}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Buscar por nombre, SKU o código de barras…"
+                disabled={saveMut.isPending}
+              />
               {form.formState.errors.product_id && (
                 <p className="text-sm text-destructive">
                   {form.formState.errors.product_id.message}
@@ -406,14 +477,14 @@ function StockMovementsPage() {
                 Cancelar
               </Button>
               <Button type="submit" disabled={saveMut.isPending}>
-                {saveMut.isPending ? "Guardando..." : "Registrar"}
+                {saveMut.isPending ? "Guardando…" : "Registrar"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* ── Confirmar anulación ───────────────────────────────────────────── */}
+      {/* ── Confirmar anulación ───────────────────────────────────────────────── */}
       <AlertDialog
         open={!!voidingId}
         onOpenChange={(v) => {

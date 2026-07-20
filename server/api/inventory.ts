@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { eq, and, desc, ilike, or, isNull, sql } from "drizzle-orm";
+import { eq, and, desc, ilike, or, isNull, sql, gte, lte } from "drizzle-orm";
 import { db } from "../db";
 import { calculateCashImpact, recalculateCashSession, recalculateStock } from "../lib/reconciliation";
 import { evaluateStockAlerts, broadcastStockAlert } from "../lib/stockAlerts";
@@ -178,6 +178,55 @@ export function registerInventoryRoutes(app: Express): void {
       codigo_barras: r.codigoBarras,   // alias snake_case para compatibilidad con frontend
       categories: r.categoryNombre ? { nombre: r.categoryNombre } : null,
     })));
+  }));
+
+  // ── Búsqueda inteligente de productos (para ProductPicker) ──────────────────
+  app.get("/api/products/search", isAuthenticated, wrapAsync(async (req, res) => {
+    const { tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
+
+    const q = ((req as any).query.q as string | undefined)?.trim() ?? "";
+    const limit = Math.min(Number((req as any).query.limit ?? 20), 50);
+
+    if (!q) return res.json([]);
+
+    const pattern = `%${q}%`;
+    const rows = await db
+      .select({
+        id: products.id,
+        nombre: products.nombre,
+        sku: products.sku,
+        codigoBarras: products.codigoBarras,
+        stock: products.stock,
+        categoryNombre: categories.nombre,
+      })
+      .from(products)
+      .leftJoin(categories, eq(products.categoryId, categories.id))
+      .where(
+        and(
+          eq(products.tenantId, tenantId),
+          eq(products.activo, true),
+          or(
+            ilike(products.nombre, pattern),
+            ilike(products.sku, pattern),
+            ilike(products.codigoBarras, pattern),
+            ilike(categories.nombre, pattern),
+          ),
+        ),
+      )
+      .orderBy(products.nombre)
+      .limit(limit);
+
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        nombre: r.nombre,
+        sku: r.sku ?? null,
+        codigoBarras: r.codigoBarras ?? null,
+        stock: r.stock,
+        categoryNombre: r.categoryNombre ?? null,
+      })),
+    );
   }));
 
   app.post("/api/products", isAuthenticated, wrapAsync(async (req, res) => {
@@ -1083,9 +1132,23 @@ export function registerInventoryRoutes(app: Express): void {
     if (!tenantId) return noTenant(res);
     const productId = (req as any).query.productId as string | undefined;
     const q = ((req as any).query.q as string | undefined)?.trim();
+    const tipo = (req as any).query.tipo as string | undefined;
+    const fechaDesde = (req as any).query.fechaDesde as string | undefined;
+    const fechaHasta = (req as any).query.fechaHasta as string | undefined;
 
     const conditions: ReturnType<typeof eq>[] = [eq(stockMovements.tenantId, tenantId) as any];
     if (productId) conditions.push(eq(stockMovements.productId, productId) as any);
+    if (tipo === "entrada" || tipo === "salida") {
+      conditions.push(eq(stockMovements.tipo, tipo) as any);
+    }
+    if (fechaDesde) {
+      conditions.push(gte(stockMovements.createdAt, new Date(fechaDesde)) as any);
+    }
+    if (fechaHasta) {
+      const hasta = new Date(fechaHasta);
+      hasta.setHours(23, 59, 59, 999);
+      conditions.push(lte(stockMovements.createdAt, hasta) as any);
+    }
     if (q) {
       const pattern = `%${q}%`;
       conditions.push(
@@ -1094,6 +1157,7 @@ export function registerInventoryRoutes(app: Express): void {
           ilike(products.sku, pattern),
           ilike(products.codigoBarras, pattern),
           ilike(categories.nombre, pattern),
+          ilike(stockMovements.observacion, pattern),
         ) as any,
       );
     }

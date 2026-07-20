@@ -190,6 +190,21 @@ export async function listProducts(): Promise<Product[]> {
   return apiFetch("/api/products");
 }
 
+export type ProductSearchResult = {
+  id: string;
+  nombre: string;
+  sku: string | null;
+  codigoBarras: string | null;
+  stock: number;
+  categoryNombre: string | null;
+};
+
+export async function searchProducts(q: string, limit = 20): Promise<ProductSearchResult[]> {
+  if (!q.trim()) return [];
+  const sp = new URLSearchParams({ q: q.trim(), limit: String(limit) });
+  return apiFetch(`/api/products/search?${sp.toString()}`);
+}
+
 export async function createProduct(input: ProductInput): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/api/products", { method: "POST", body: JSON.stringify(input), timeoutMs: 3000 });
 }
@@ -303,10 +318,19 @@ export async function voidSale(id: string) {
 }
 
 // ── Stock Movements ───────────────────────────────────────────────────────────
-export async function listStockMovements(params: { productId?: string | null; q?: string } = {}): Promise<StockMovement[]> {
+export async function listStockMovements(params: {
+  productId?: string | null;
+  q?: string;
+  tipo?: "entrada" | "salida" | null;
+  fechaDesde?: string | null;
+  fechaHasta?: string | null;
+} = {}): Promise<StockMovement[]> {
   const sp = new URLSearchParams();
   if (params.productId) sp.set("productId", params.productId);
   if (params.q) sp.set("q", params.q);
+  if (params.tipo) sp.set("tipo", params.tipo);
+  if (params.fechaDesde) sp.set("fechaDesde", params.fechaDesde);
+  if (params.fechaHasta) sp.set("fechaHasta", params.fechaHasta);
   const qs = sp.toString() ? `?${sp.toString()}` : "";
   return apiFetch(`/api/stock-movements${qs}`);
 }
