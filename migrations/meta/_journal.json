@@ -36,6 +36,13 @@
       "when": 1781643880000,
       "tag": "0004_customer_account_movements",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1753027200000,
+      "tag": "0005_product_search_indexes",
+      "breakpoints": true
     }
   ]
 }
