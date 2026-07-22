@@ -1089,7 +1089,7 @@ export function registerInventoryRoutes(app: Express): void {
 
       res.json(result);
       for (const a of saleStockAlerts) if (a) broadcastStockAlert(tenantId, a);
-      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements", "cash_session"] });
+      broadcast(tenantId, { type: "invalidate", entities: ["sales", "products", "stock_movements", "cash_session", "customers"] });
     } catch (err: any) {
       const status = (err as any).status === 400 ? 400 : 500;
       const message = err?.message ?? "Error al registrar la venta";

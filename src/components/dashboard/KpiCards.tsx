@@ -112,22 +112,22 @@ export function KpiCards() {
     <>
       <KpiCard
         title="Ventas de hoy"
-        value={formatCurrency(data.salesToday)}
+        value={formatCurrency(data.collectedToday)}
         icon={<ShoppingCart className="h-4 w-4" />}
         description={
           data.salesCountToday > 0
-            ? `${data.salesCountToday} venta${data.salesCountToday !== 1 ? "s" : ""} · cobrado ${formatCurrency(data.collectedToday)}`
+            ? `${data.salesCountToday} venta${data.salesCountToday !== 1 ? "s" : ""} · total facturado ${formatCurrency(data.salesToday)}`
             : "Sin ventas hoy"
         }
         subItems={todaySubItems}
       />
       <KpiCard
         title="Ventas del mes"
-        value={formatCurrency(data.salesMonth)}
+        value={formatCurrency(data.collectedMonth)}
         icon={<DollarSign className="h-4 w-4" />}
         description={
           data.salesCountMonth > 0
-            ? `${data.salesCountMonth} ventas · cobrado ${formatCompact(data.collectedMonth)}`
+            ? `${data.salesCountMonth} ventas · total facturado ${formatCompact(data.salesMonth)}`
             : "Sin ventas este mes"
         }
         subItems={monthSubItems}

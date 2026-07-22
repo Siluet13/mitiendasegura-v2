@@ -1,0 +1,95 @@
+Quiero implementar todas las correcciones pendientes del Dashboard en una única intervención. No agregues funcionalidades nuevas ni modifiques ningún otro módulo. Trabajá únicamente sobre Dashboard y, si es estrictamente necesario, sobre los endpoints/API que alimentan esos datos.
+
+OBJETIVOS
+
+1. VENTAS DE HOY Y DEL MES
+Actualmente las ventas realizadas "A Cuenta Corriente" están siendo contabilizadas dentro de los ingresos del Dashboard.
+
+Eso es incorrecto.
+
+Las tarjetas:
+
+- Ventas de Hoy
+- Ventas del Mes
+
+deben mostrar únicamente dinero realmente ingresado.
+
+Las ventas cuyo payment_method sea "account" (Cuenta Corriente) NO deben sumarse en esos indicadores porque todavía no representan un ingreso de dinero.
+
+IMPORTANTE:
+
+- No modificar el funcionamiento de Ventas.
+- No modificar Caja.
+- Solo corregir los KPIs del Dashboard.
+
+------------------------------------------------------------
+
+2. ELIMINAR "TOP 10 PRODUCTOS / UNIDADES VENDIDAS"
+
+Eliminar completamente del Dashboard:
+
+- Top 10 Productos
+- Unidades Vendidas
+
+No dejar espacios vacíos ni componentes ocultos.
+
+Reacomodar el layout para que el Dashboard quede limpio.
+
+------------------------------------------------------------
+
+3. CLIENTES - ACTUALIZACIÓN INMEDIATA DE DEUDA
+
+Actualmente ocurre este bug:
+
+- Se realiza una venta A Cuenta Corriente.
+- La venta queda registrada correctamente.
+- Si voy inmediatamente al listado de Clientes, el saldo NO cambia.
+- Si entro al detalle del cliente sí aparece.
+- Si cierro y vuelvo a abrir la aplicación recién ahí el listado muestra la deuda correcta.
+
+Esto debe corregirse.
+
+Objetivo:
+
+Al finalizar una venta A Cuenta Corriente:
+
+- el listado de Clientes debe actualizar inmediatamente el saldo del cliente
+- sin refrescar la página
+- sin cerrar la aplicación
+- sin volver a ingresar
+
+Revisar invalidaciones de cache, query keys, SSE o cualquier mecanismo de actualización que ya utiliza la aplicación.
+
+NO hacer hacks.
+
+Debe utilizar el mismo mecanismo de actualización en tiempo real que utiliza el resto de la aplicación.
+
+------------------------------------------------------------
+
+RESTRICCIONES
+
+NO modificar:
+
+- Productos
+- Movimientos
+- Backup
+- Caja
+- Billing
+- Stock Alerts
+- Cuenta Corriente
+- Panel Admin
+
+Solo Dashboard y lo estrictamente necesario para que Clientes se actualice inmediatamente después de una venta a cuenta corriente.
+
+------------------------------------------------------------
+
+AL FINAL ENTREGAR
+
+1. Archivos modificados.
+2. Qué cambió en cada archivo.
+3. Confirmar que:
+   - Ventas de Hoy ya no incluye Cuenta Corriente.
+   - Ventas del Mes ya no incluye Cuenta Corriente.
+   - Top 10 fue eliminado.
+   - La deuda del cliente se actualiza inmediatamente después de vender a cuenta corriente.
+4. Confirmar que no se modificó ningún otro módulo.

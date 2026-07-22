@@ -1,10 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { KpiCards } from "@/components/dashboard/KpiCards";
 import { StockAlerts } from "@/components/dashboard/StockAlerts";
-import { TopProductsTable } from "@/components/dashboard/TopProductsTable";
 import { RecentSales } from "@/components/dashboard/RecentSales";
 import { SalesLineChart } from "@/components/dashboard/SalesLineChart";
-import { TopProductsChart } from "@/components/dashboard/TopProductsChart";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard Ejecutivo" }] }),
@@ -31,15 +29,9 @@ function DashboardPage() {
         <SalesLineChart />
       </div>
 
-      {/* Stock alerts + Top products table */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <StockAlerts />
-        <TopProductsTable />
-      </div>
-
-      {/* Top products bar chart — full width */}
+      {/* Stock alerts — full width */}
       <div className="grid grid-cols-1 gap-4">
-        <TopProductsChart />
+        <StockAlerts />
       </div>
 
       {/* Recent sales — full width */}

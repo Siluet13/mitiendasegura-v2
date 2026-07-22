@@ -207,7 +207,6 @@ export function registerDashboardRoutes(app: Express): void {
       activeProductsCount,
       customersCount,
       stockRows,
-      topProductsRows,
       recentSalesRows,
       salesByDayRows,
     ] = await Promise.all([
@@ -223,19 +222,6 @@ export function registerDashboardRoutes(app: Express): void {
         .from(products)
         .where(and(eq(products.tenantId, tenantId), eq(products.activo, true)))
         .orderBy(products.stock),
-      db.select({
-        productId: saleItems.productId,
-        nombre:    products.nombre,
-        unidades:  sum(saleItems.cantidad).mapWith(Number),
-        importe:   sum(saleItems.subtotal).mapWith(Number),
-      })
-        .from(saleItems)
-        .innerJoin(sales, eq(saleItems.saleId, sales.id))
-        .leftJoin(products, eq(saleItems.productId, products.id))
-        .where(and(eq(sales.tenantId, tenantId), eq(sales.status, "active")))
-        .groupBy(saleItems.productId, products.nombre)
-        .orderBy(desc(sum(saleItems.cantidad)))
-        .limit(10),
       db.select({
         id:                 sales.id,
         createdAt:          sales.createdAt,
@@ -295,12 +281,6 @@ export function registerDashboardRoutes(app: Express): void {
         sinStock:  alerts.filter((p) => p.stock === 0),
         stockBajo: alerts.filter((p) => p.stock > 0 && p.stock <= p.stockMinimo),
       },
-      topProducts: topProductsRows.map((r) => ({
-        product_id: r.productId,
-        nombre:     r.nombre ?? "Producto eliminado",
-        unidades:   r.unidades ?? 0,
-        importe:    r.importe ?? 0,
-      })),
       recentSales: recentSalesRows.map((s) => ({
         id:                 s.id,
         created_at:         s.createdAt,
