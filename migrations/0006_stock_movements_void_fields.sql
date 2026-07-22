@@ -1,0 +1,4 @@
+ALTER TABLE stock_movements
+  ADD COLUMN IF NOT EXISTS voided_at  TIMESTAMP,
+  ADD COLUMN IF NOT EXISTS voided_by  VARCHAR,
+  ADD COLUMN IF NOT EXISTS void_reason TEXT;
