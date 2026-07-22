@@ -2,6 +2,14 @@
 
 Sistema de punto de venta (POS) y gestión de inventario para pequeños negocios.
 
+## Estado del entorno (Replit)
+
+- **Dependencias**: instaladas con `bun install` ✓
+- **Base de datos**: Replit PostgreSQL provisionada automáticamente; `DATABASE_URL` inyectada en runtime ✓
+- **Schema**: 17 tablas creadas aplicando las 6 migraciones de `migrations/` + columnas adicionales del schema (`products.initial_stock`, columnas de ventas/pagos, `cash_register_sessions`, `admin_logs`, `receipt_settings`) ✓
+- **Migrations journal**: `drizzle.__drizzle_migrations` actualizado con las 6 entradas ✓
+- **Servidores**: API Express (5001) + Vite dev (5000) corriendo vía workflow "Start application" ✓
+
 ## Arquitectura
 
 - **Frontend**: React 19 + TanStack Start + TanStack Router + React Query + Tailwind CSS + Shadcn/UI
