@@ -1,4 +1,5 @@
 - [POS SaaS Architecture](pos-saas-arch.md) — Express API port 5001 + Vite SPA port 5000; auth is Replit OIDC, NOT Supabase (Supabase was fully removed).
+- [Fresh install auto-migration](fresh-install-migration.md) — migrate() runs in server/index.ts before setupAuth(); never use drizzle-kit CLI as migration path; usePwaInstall needs SSR guard.
 - [Invalid Redirect URI Fix](invalid-redirect-uri.md) — Vite proxy changeOrigin:true makes req.hostname="localhost"; fix is getAppDomain() reading REPLIT_DOMAINS env var first.
 - [Dashboard N+1 Fix](dashboard-n1-fix.md) — recent-sales and top-products had N+1 / full-table JS aggregation; replaced with JOIN+COUNT and SQL GROUP BY in dashboard.ts.
 - [PWA Hardening](pwa-hardening.md) — icons replaced with real artwork (magick from 1024×1024 logo); SW uses __SW_VERSION__ placeholder replaced by Vite closeBundle plugin; updateViaCache:'none' + periodic registration.update() every 60min; console.log removed from SW production code.
