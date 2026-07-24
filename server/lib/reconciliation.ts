@@ -43,13 +43,13 @@ type AnyDb = any;
  *   netSales      = total bruto (todas las ventas activas, todos los métodos)
  */
 export interface CashSummary {
-  /** Porción cobrada en efectivo. */
+  /** Porción cobrada en efectivo (ventas). */
   cashTotal: number;
-  /** Porción cobrada por transferencia. */
+  /** Porción cobrada por transferencia (ventas). */
   transferTotal: number;
   /** Ventas en cuenta corriente (pendientes de cobro, no ingresan a caja). */
   accountTotal: number;
-  /** Total físicamente cobrado = cashTotal + transferTotal. */
+  /** Total físicamente cobrado = cashTotal + transferTotal + cobros de cta. corriente. */
   collectedTotal: number;
   /** Monto bruto total de ventas activas (todos los métodos de pago). */
   netSales: number;
@@ -62,6 +62,12 @@ export interface CashSummary {
     account: number;
     mixed: number;
   };
+  /** Cobros de deuda de cuenta corriente recibidos en efectivo. */
+  accountPaymentsCash: number;
+  /** Cobros de deuda de cuenta corriente recibidos por transferencia. */
+  accountPaymentsTransfer: number;
+  /** Total cobrado de cuentas corrientes (efectivo + transferencia). */
+  accountPaymentsTotal: number;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -134,6 +140,7 @@ export async function calculateCashSummary(
   tenantId: string,
   tx: AnyDb = db,
 ): Promise<CashSummary> {
+  // ── Query 1: ventas de la sesión ──────────────────────────────────────────
   const [agg] = await tx
     .select({
       cashTotal:     sum(sql`COALESCE(${sales.cashAmount}, ${sales.total})`),
@@ -163,15 +170,28 @@ export async function calculateCashSummary(
       ),
     );
 
-  const cashTotal     = agg?.cashTotal     ? Number(agg.cashTotal)     : 0;
-  const transferTotal = agg?.transferTotal ? Number(agg.transferTotal) : 0;
-  const accountTotal  = agg?.accountTotal  ? Number(agg.accountTotal)  : 0;
+  // ── Query 2: cobros de cuenta corriente registrados en esta sesión ────────
+  const [sessionRow] = await tx
+    .select({
+      accountPaymentsCash:     cashRegisterSessions.accountPaymentsCash,
+      accountPaymentsTransfer: cashRegisterSessions.accountPaymentsTransfer,
+    })
+    .from(cashRegisterSessions)
+    .where(eq(cashRegisterSessions.id, sessionId));
+
+  const cashTotal               = agg?.cashTotal     ? Number(agg.cashTotal)     : 0;
+  const transferTotal           = agg?.transferTotal ? Number(agg.transferTotal) : 0;
+  const accountTotal            = agg?.accountTotal  ? Number(agg.accountTotal)  : 0;
+  const accountPaymentsCash     = Number(sessionRow?.accountPaymentsCash     ?? 0);
+  const accountPaymentsTransfer = Number(sessionRow?.accountPaymentsTransfer ?? 0);
+  const accountPaymentsTotal    = accountPaymentsCash + accountPaymentsTransfer;
 
   return {
     cashTotal,
     transferTotal,
     accountTotal,
-    collectedTotal: cashTotal + transferTotal,
+    // collectedTotal incluye ventas cobradas + cobros de cuentas corrientes
+    collectedTotal: cashTotal + transferTotal + accountPaymentsTotal,
     netSales:    agg?.netSales    ? Number(agg.netSales)    : 0,
     salesCount:  agg?.salesCount  ? Number(agg.salesCount)  : 0,
     salesByPaymentMethod: {
@@ -180,6 +200,9 @@ export async function calculateCashSummary(
       account:  agg?.countAccount  ? Number(agg.countAccount)  : 0,
       mixed:    agg?.countMixed    ? Number(agg.countMixed)    : 0,
     },
+    accountPaymentsCash,
+    accountPaymentsTransfer,
+    accountPaymentsTotal,
   };
 }
 

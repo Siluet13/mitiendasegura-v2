@@ -173,6 +173,8 @@ export const customerAccountMovements = pgTable("customer_account_movements", {
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   balanceAfter: numeric("balance_after", { precision: 12, scale: 2 }).notNull(),
   observacion: text("observacion"),
+  // Forma de pago del cobro: "cash" | "transfer". Solo para type="payment".
+  paymentMethod: text("payment_method"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("cam_tenant_id_idx").on(t.tenantId),

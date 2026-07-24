@@ -20,6 +20,9 @@ const EMPTY_SUMMARY: CashSummary = {
   netSales: 0,
   salesCount: 0,
   salesByPaymentMethod: { cash: 0, transfer: 0, account: 0, mixed: 0 },
+  accountPaymentsCash: 0,
+  accountPaymentsTransfer: 0,
+  accountPaymentsTotal: 0,
 };
 
 /**
@@ -43,13 +46,16 @@ function toResponse(
     total_sales: session.totalSales,
     status: session.status,
     // Resumen financiero completo (fuente: calculateCashSummary)
-    current_total: summary.collectedTotal,        // efectivo + transferencias
-    cash_total: summary.cashTotal,                // solo efectivo
-    transfer_total: summary.transferTotal,        // solo transferencias
-    account_total: summary.accountTotal,          // cuenta corriente (no entra a caja)
-    net_sales: summary.netSales,                  // total bruto de todas las ventas activas
+    current_total: summary.collectedTotal,           // ventas cobradas + cobros cta. corriente
+    cash_total: summary.cashTotal,                   // efectivo de ventas
+    transfer_total: summary.transferTotal,           // transferencias de ventas
+    account_total: summary.accountTotal,             // cuenta corriente pendiente (no entra a caja)
+    net_sales: summary.netSales,                     // total bruto de todas las ventas activas
     sales_count: summary.salesCount,
     sales_by_payment_method: summary.salesByPaymentMethod,
+    account_payments_cash: summary.accountPaymentsCash,       // cobros cta. corriente en efectivo
+    account_payments_transfer: summary.accountPaymentsTransfer, // cobros cta. corriente por transferencia
+    account_payments_total: summary.accountPaymentsTotal,     // total cobros de cta. corriente
   };
 }
 

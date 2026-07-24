@@ -1,0 +1,191 @@
+OBJETIVO
+
+Corregir el flujo de cobro de Cuenta Corriente para que los pagos impacten correctamente en Caja.
+
+IMPORTANTE
+
+- Antes de escribir código, auditar el flujo actual completo.
+- Modificar únicamente los archivos necesarios.
+- No cambiar ningún otro comportamiento del sistema.
+- No tocar Billing, Dashboard, Backup ni Ventas.
+- Mantener arquitectura SaaS (tenant_id).
+- Mantener compatibilidad con las sesiones de caja actuales.
+
+=========================================
+FASE 1 - AUDITORÍA
+=========================================
+
+Localizar:
+
+- Pantalla "Registrar pago" de Clientes.
+- Endpoint backend que registra el pago.
+- Tabla customer_account_movements.
+- Lógica que actualiza customer_accounts.
+- Lógica de Caja (cash_register_sessions).
+- reconciliation.ts.
+
+Verificar cómo se registra actualmente un pago.
+
+=========================================
+FASE 2 - UI
+=========================================
+
+En el diálogo "Registrar pago" agregar:
+
+Forma de pago
+
+○ Efectivo
+○ Transferencia
+
+Por defecto:
+Efectivo.
+
+No modificar el resto del formulario.
+
+=========================================
+FASE 3 - BACKEND
+=========================================
+
+Cuando se registra un pago:
+
+Dentro de UNA MISMA TRANSACCIÓN:
+
+1. Registrar movimiento de cuenta corriente.
+
+2. Actualizar saldo del cliente.
+
+3. Actualizar la sesión de caja abierta.
+
+Si forma de pago = efectivo
+
+incrementar cash_amount.
+
+Si forma de pago = transferencia
+
+incrementar transfer_amount.
+
+NO modificar total de ventas.
+
+NO crear ventas nuevas.
+
+NO modificar sale_items.
+
+NO modificar stock.
+
+=========================================
+FASE 4 - HISTORIAL
+=========================================
+
+Guardar la forma de pago en el movimiento de cuenta corriente.
+
+Debe verse luego en el historial.
+
+Ejemplo:
+
+Pago
+$25.000
+Transferencia
+
+o
+
+Pago
+$25.000
+Efectivo
+
+=========================================
+FASE 5 - RECONCILIACIÓN
+=========================================
+
+Actualizar reconciliation.ts para que:
+
+Los cobros de cuenta corriente aparezcan correctamente separados por:
+
+- efectivo
+
+- transferencia
+
+sin alterar las ventas.
+
+=========================================
+FASE 6 - VALIDACIÓN
+=========================================
+
+Probar:
+
+Venta fiada
+
+↓
+
+Cliente paga efectivo
+
+↓
+
+Disminuye deuda
+
+↓
+
+Caja efectivo aumenta
+
+↓
+
+Reconciliation correcto
+
+↓
+
+Cierre de caja correcto
+
+------------------------------------------
+
+Venta fiada
+
+↓
+
+Cliente paga transferencia
+
+↓
+
+Disminuye deuda
+
+↓
+
+Transferencias aumentan
+
+↓
+
+Caja efectivo NO cambia
+
+↓
+
+Reconciliation correcto
+
+=========================================
+NO HACER
+=========================================
+
+No modificar:
+
+- Billing
+
+- Backup
+
+- Dashboard
+
+- Ventas
+
+- Sidebar
+
+- Panel Maestro
+
+- Offline
+
+No cambiar estilos salvo agregar el selector.
+
+Al finalizar entregar:
+
+- archivos modificados
+
+- motivo de cada cambio
+
+- pruebas realizadas
+
+- confirmar que el flujo quedó consistente contablemente.

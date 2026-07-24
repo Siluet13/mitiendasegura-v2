@@ -11,6 +11,9 @@ export const cashRegisterSessions = pgTable("cash_register_sessions", {
   finalAmount: numeric("final_amount", { precision: 12, scale: 2 }),
   totalSales: numeric("total_sales", { precision: 12, scale: 2 }),
   status: text("status").notNull().default("open"),
+  // Cobros de deuda de cuenta corriente recibidos durante la sesión (NO son ventas)
+  accountPaymentsCash:     numeric("account_payments_cash",     { precision: 12, scale: 2 }).notNull().default("0"),
+  accountPaymentsTransfer: numeric("account_payments_transfer", { precision: 12, scale: 2 }).notNull().default("0"),
 }, (t) => [
   index("cash_register_sessions_tenant_id_idx").on(t.tenantId),
   uniqueIndex("cash_sessions_one_open_per_user").on(t.tenantId, t.userId).where(sql`status = 'open'`),

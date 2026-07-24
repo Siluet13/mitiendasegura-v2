@@ -35,6 +35,7 @@ async function adjustCustomerAccountBalance(
     referenceId?: string | null;
     referenceType?: string | null;
     observacion?: string | null;
+    paymentMethod?: string | null;
   },
 ) {
   if (delta === 0) return;
@@ -65,6 +66,7 @@ async function adjustCustomerAccountBalance(
       amount: String(delta),
       balanceAfter: updated?.balance ?? "0",
       observacion: movement.observacion ?? null,
+      paymentMethod: movement.paymentMethod ?? null,
     });
   }
 }
@@ -398,14 +400,17 @@ export function registerInventoryRoutes(app: Express): void {
   }));
 
   app.post("/api/customers/:id/payment", isAuthenticated, wrapAsync(async (req, res) => {
-    const { tenantId } = requireTenant(req);
+    const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
     const id = String(req.params.id);
-    const { amount, observacion } = req.body;
+    const { amount, observacion, payment_method } = req.body;
 
     const amountNum = Number(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       return res.status(400).json({ message: "El importe debe ser mayor a cero" });
+    }
+    if (!payment_method || !["cash", "transfer"].includes(String(payment_method))) {
+      return res.status(400).json({ message: "Forma de pago inválida. Seleccioná efectivo o transferencia." });
     }
 
     try {
@@ -430,16 +435,43 @@ export function registerInventoryRoutes(app: Express): void {
           );
         }
 
+        // Registrar movimiento en cuenta corriente con forma de pago
         await adjustCustomerAccountBalance(id, tenantId, -amountNum, tx, {
           type: "payment",
           referenceId: null,
           referenceType: "payment",
           observacion: (observacion as string | undefined)?.trim() || null,
+          paymentMethod: payment_method,
         });
+
+        // Actualizar la sesión de caja activa del usuario (si existe)
+        const [activeSession] = await tx
+          .select({ id: cashRegisterSessions.id })
+          .from(cashRegisterSessions)
+          .where(and(
+            eq(cashRegisterSessions.tenantId, tenantId),
+            eq(cashRegisterSessions.userId, userId),
+            eq(cashRegisterSessions.status, "open"),
+          ))
+          .for("update");
+
+        if (activeSession) {
+          if (payment_method === "cash") {
+            await tx
+              .update(cashRegisterSessions)
+              .set({ accountPaymentsCash: sql`account_payments_cash + ${String(amountNum)}` })
+              .where(eq(cashRegisterSessions.id, activeSession.id));
+          } else {
+            await tx
+              .update(cashRegisterSessions)
+              .set({ accountPaymentsTransfer: sql`account_payments_transfer + ${String(amountNum)}` })
+              .where(eq(cashRegisterSessions.id, activeSession.id));
+          }
+        }
       });
 
       res.json({ ok: true });
-      broadcast(tenantId, { type: "invalidate", entities: ["customer_accounts", "customers"] });
+      broadcast(tenantId, { type: "invalidate", entities: ["customer_accounts", "customers", "cash_session"] });
     } catch (err: any) {
       const status = err?.status === 404 ? 404 : err?.status === 400 ? 400 : 500;
       res.status(status).json({ message: err?.message ?? "Error al registrar pago" });
