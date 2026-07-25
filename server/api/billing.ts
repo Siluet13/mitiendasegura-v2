@@ -1,3 +1,10 @@
+/**
+ * server/api/billing.ts — endpoints de billing auto-gestionados por el usuario.
+ *
+ * Todos los pagos (payment, reactivate) pasan por processPayment().
+ * Suspend escribe directamente a licenses (no es un pago).
+ * MASTER_ADMIN_ID nunca accede a estos endpoints (guard isAdminSelf).
+ */
 import type { Express } from "express";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
@@ -6,13 +13,8 @@ import { requireTenant } from "../lib/context";
 import { wrapAsync } from "../lib/asyncHandler";
 import { businessSettings, licenses } from "@shared/schema";
 import { getBillingStatus } from "@shared/billing";
+import { processPayment } from "../lib/payment";
 import { logEvent } from "../lib/logger";
-
-const CYCLE_DAYS = 30;
-
-function cycleEnd(from: Date): Date {
-  return new Date(from.getTime() + CYCLE_DAYS * 24 * 60 * 60 * 1000);
-}
 
 /**
  * Guard: MASTER_ADMIN_ID no es un cliente y no gestiona billing propio.
@@ -27,6 +29,9 @@ function isAdminSelf(userId: string, res: any): boolean {
 }
 
 export function registerBillingRoutes(app: Express): void {
+  // ── GET /api/billing/status — datos visuales del ciclo de billing ────────────
+  // Solo lectura; fuente: business_settings.
+  // No decide acceso (eso es checkLicense + licenses.status).
   app.get("/api/billing/status", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     if (isAdminSelf(userId, res)) return;
@@ -39,7 +44,7 @@ export function registerBillingRoutes(app: Express): void {
     if (!bs) {
       return res.json({
         status: "active",
-        daysLeft: CYCLE_DAYS,
+        daysLeft: 30,
         billingCycleStart: null,
         billingCycleEnd: null,
         lastPaymentDate: null,
@@ -61,46 +66,19 @@ export function registerBillingRoutes(app: Express): void {
     });
   }));
 
+  // ── POST /api/billing/payment — pago auto-gestionado ────────────────────────
+  // Usa processPayment() como función central: actualiza licenses + business_settings
+  // con expiresAt y lastPaymentAt correctos.
   app.post("/api/billing/payment", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     if (isAdminSelf(userId, res)) return;
 
-    const now = new Date();
-    const end = cycleEnd(now);
-
-    await db
-      .insert(businessSettings)
-      .values({
-        ownerId: userId,
-        nombreNegocio: "",
-        lastPaymentDate: now,
-        billingCycleStart: now,
-        billingCycleEnd: end,
-        subscriptionStatus: "active",
-      })
-      .onConflictDoUpdate({
-        target: businessSettings.ownerId,
-        set: {
-          lastPaymentDate: now,
-          billingCycleStart: now,
-          billingCycleEnd: end,
-          subscriptionStatus: "active",
-          updatedAt: now,
-        },
-      });
-
-    await db
-      .insert(licenses)
-      .values({ ownerId: userId, status: "activa", activatedAt: now, lastPaymentAt: now })
-      .onConflictDoUpdate({
-        target: licenses.ownerId,
-        set: { status: "activa", activatedAt: now, lastPaymentAt: now, updatedAt: now },
-      });
-
-    logEvent({ module: "billing", event: "PAYMENT_REGISTERED", message: "Pago registrado", userId, ownerId: userId, details: { cycleEnd: end.toISOString() } });
-    res.json({ ok: true });
+    const result = await processPayment(userId, userId);
+    res.json({ ok: true, expiresAt: result.expiresAt.toISOString(), lastPaymentAt: result.lastPaymentAt.toISOString() });
   }));
 
+  // ── POST /api/billing/suspend — suspensión de cuenta ────────────────────────
+  // No es un pago; escribe directamente a licenses.
   app.post("/api/billing/suspend", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     if (isAdminSelf(userId, res)) return;
@@ -127,41 +105,15 @@ export function registerBillingRoutes(app: Express): void {
     res.json({ ok: true });
   }));
 
+  // ── POST /api/billing/reactivate — reactivación de cuenta ───────────────────
+  // Es equivalente a un pago: usa processPayment() para restablecer
+  // licenses.expiresAt y lastPaymentAt correctamente.
   app.post("/api/billing/reactivate", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
     if (isAdminSelf(userId, res)) return;
 
-    const now = new Date();
-    const end = cycleEnd(now);
-
-    await db
-      .insert(businessSettings)
-      .values({
-        ownerId: userId,
-        nombreNegocio: "",
-        subscriptionStatus: "active",
-        billingCycleStart: now,
-        billingCycleEnd: end,
-      })
-      .onConflictDoUpdate({
-        target: businessSettings.ownerId,
-        set: {
-          subscriptionStatus: "active",
-          billingCycleStart: now,
-          billingCycleEnd: end,
-          updatedAt: now,
-        },
-      });
-
-    await db
-      .insert(licenses)
-      .values({ ownerId: userId, status: "activa", activatedAt: now })
-      .onConflictDoUpdate({
-        target: licenses.ownerId,
-        set: { status: "activa", activatedAt: now, updatedAt: now },
-      });
-
-    logEvent({ module: "billing", event: "SUBSCRIPTION_REACTIVATED", message: "Suscripción reactivada", userId, ownerId: userId });
-    res.json({ ok: true });
+    const result = await processPayment(userId, userId);
+    logEvent({ module: "billing", event: "SUBSCRIPTION_REACTIVATED", message: "Suscripción reactivada vía pago", userId, ownerId: userId, details: { expiresAt: result.expiresAt.toISOString() } });
+    res.json({ ok: true, expiresAt: result.expiresAt.toISOString() });
   }));
 }

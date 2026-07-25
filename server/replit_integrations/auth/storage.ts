@@ -27,12 +27,15 @@ class AuthStorage implements IAuthStorage {
     const isAdmin = !!adminId && user.id === adminId;
 
     if (isAdmin) {
+      // MASTER_ADMIN_ID siempre tiene licencia "permanente" en la DB.
+      // El bypass en /api/license/status y checkLicense ya cubre casos de
+      // datos inconsistentes, pero mantener la fila coherente es correcto.
       await db
         .insert(licenses)
-        .values({ ownerId: user.id, status: "activa" })
+        .values({ ownerId: user.id, status: "permanente" })
         .onConflictDoUpdate({
           target: licenses.ownerId,
-          set: { status: "activa", updatedAt: new Date() },
+          set: { status: "permanente", updatedAt: new Date() },
         });
     } else {
       await db
