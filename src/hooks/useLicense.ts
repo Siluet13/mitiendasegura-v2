@@ -1,12 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
+import type { LicenseStatus } from "@shared/licensing";
+import { isLicenseActive } from "@shared/licensing";
 
-export type LicenseStatus = "activa" | "pendiente" | "suspendida" | "vencida";
+export type { LicenseStatus };
 
 export interface LicenseState {
   status: LicenseStatus;
   activatedAt: string | null;
   expiresAt: string | null;
   suspendedAt: string | null;
+  demoEndsAt: string | null;
+  graceEndsAt: string | null;
+  lastPaymentAt: string | null;
 }
 
 const LICENSE_CACHE_KEY = "mts_cached_license";
@@ -16,6 +21,9 @@ const OFFLINE_DEFAULT: LicenseState = {
   activatedAt: null,
   expiresAt: null,
   suspendedAt: null,
+  demoEndsAt: null,
+  graceEndsAt: null,
+  lastPaymentAt: null,
 };
 
 function saveLicense(license: LicenseState): void {
@@ -47,7 +55,7 @@ async function fetchLicenseStatus(): Promise<LicenseState> {
   try {
     const signal = AbortSignal?.timeout?.(8000);
     const res = await fetch("/api/license/status", { credentials: "include", signal });
-    if (!res.ok) return { status: "pendiente", activatedAt: null, expiresAt: null, suspendedAt: null };
+    if (!res.ok) return { status: "pendiente", activatedAt: null, expiresAt: null, suspendedAt: null, demoEndsAt: null, graceEndsAt: null, lastPaymentAt: null };
     const license = (await res.json()) as LicenseState;
     saveLicense(license);
     return license;
@@ -73,6 +81,6 @@ export function useLicense() {
   return {
     license: data ?? null,
     licenseLoading: isLoading,
-    isActive: data?.status === "activa",
+    isActive: isLicenseActive(data?.status),
   };
 }

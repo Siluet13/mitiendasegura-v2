@@ -14,9 +14,22 @@ function cycleEnd(from: Date): Date {
   return new Date(from.getTime() + CYCLE_DAYS * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * Guard: MASTER_ADMIN_ID no es un cliente y no gestiona billing propio.
+ * Retorna true si la request debe ser rechazada.
+ */
+function isAdminSelf(userId: string, res: any): boolean {
+  if (userId === process.env.MASTER_ADMIN_ID) {
+    res.status(403).json({ message: "El administrador del sistema no gestiona billing" });
+    return true;
+  }
+  return false;
+}
+
 export function registerBillingRoutes(app: Express): void {
   app.get("/api/billing/status", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
+    if (isAdminSelf(userId, res)) return;
 
     const [bs] = await db
       .select()
@@ -50,6 +63,8 @@ export function registerBillingRoutes(app: Express): void {
 
   app.post("/api/billing/payment", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
+    if (isAdminSelf(userId, res)) return;
+
     const now = new Date();
     const end = cycleEnd(now);
 
@@ -76,10 +91,10 @@ export function registerBillingRoutes(app: Express): void {
 
     await db
       .insert(licenses)
-      .values({ ownerId: userId, status: "activa", activatedAt: now })
+      .values({ ownerId: userId, status: "activa", activatedAt: now, lastPaymentAt: now })
       .onConflictDoUpdate({
         target: licenses.ownerId,
-        set: { status: "activa", activatedAt: now, updatedAt: now },
+        set: { status: "activa", activatedAt: now, lastPaymentAt: now, updatedAt: now },
       });
 
     logEvent({ module: "billing", event: "PAYMENT_REGISTERED", message: "Pago registrado", userId, ownerId: userId, details: { cycleEnd: end.toISOString() } });
@@ -88,6 +103,8 @@ export function registerBillingRoutes(app: Express): void {
 
   app.post("/api/billing/suspend", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
+    if (isAdminSelf(userId, res)) return;
+
     const now = new Date();
 
     await db
@@ -112,6 +129,8 @@ export function registerBillingRoutes(app: Express): void {
 
   app.post("/api/billing/reactivate", isAuthenticated, wrapAsync(async (req, res) => {
     const { userId } = requireTenant(req);
+    if (isAdminSelf(userId, res)) return;
+
     const now = new Date();
     const end = cycleEnd(now);
 

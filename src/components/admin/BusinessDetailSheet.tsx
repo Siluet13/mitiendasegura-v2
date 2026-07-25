@@ -33,6 +33,9 @@ const STATUS_LABELS: Record<LicenseStatus, string> = {
   pendiente: "Pendiente",
   suspendida: "Suspendida",
   vencida: "Vencida",
+  demo: "Demo",
+  gracia: "Gracia",
+  permanente: "Permanente",
 };
 
 const STATUS_VARIANTS: Record<LicenseStatus, "default" | "secondary" | "destructive" | "outline"> = {
@@ -40,6 +43,9 @@ const STATUS_VARIANTS: Record<LicenseStatus, "default" | "secondary" | "destruct
   pendiente: "outline",
   suspendida: "destructive",
   vencida: "secondary",
+  demo: "outline",
+  gracia: "outline",
+  permanente: "default",
 };
 
 function fmt(date: string | null | undefined): string {

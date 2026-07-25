@@ -195,13 +195,19 @@ export function registerAdminRoutes(app: Express): void {
 
   app.put("/api/admin/licenses/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
     const ownerId = String(req.params.ownerId);
+
+    // MASTER_ADMIN_ID tiene licencia "permanente" — no puede ser modificada por nadie
+    if (ownerId === process.env.MASTER_ADMIN_ID) {
+      return res.status(403).json({ message: "La licencia del administrador no puede ser modificada" });
+    }
+
     const { status, notes, expiresAt } = req.body as {
       status: LicenseStatus;
       notes?: string;
       expiresAt?: string | null;
     };
 
-    const valid: LicenseStatus[] = ["activa", "pendiente", "suspendida", "vencida"];
+    const valid: LicenseStatus[] = ["activa", "pendiente", "suspendida", "vencida", "demo", "gracia"];
     if (!valid.includes(status)) {
       return res.status(400).json({ message: "Estado inválido" });
     }
