@@ -43,8 +43,12 @@ export function registerLicenseRoutes(app: Express): void {
     let [lic] = await db.select().from(licenses).where(eq(licenses.ownerId, userId));
 
     // ── CUENTA NUEVA: crear licencia demo automáticamente ──────────────────
-    // Se ejecuta solo una vez en el primer login. No requiere acción del admin.
-    if (!lic) {
+    // Cubre dos casos:
+    //   a) sin fila (edge case: login falló antes de que storage.ts insertara)
+    //   b) fila en "pendiente" (caso normal: storage.ts siempre inserta "pendiente"
+    //      al primer login; esta es la única transición pendiente → demo)
+    // UPSERT para no chocar con la fila existente (ownerId es UNIQUE).
+    if (!lic || lic.status === "pendiente") {
       const demoEndsAt = new Date(now.getTime() + DEMO_DAYS * 24 * 60 * 60 * 1000);
       [lic] = await db
         .insert(licenses)
@@ -56,6 +60,10 @@ export function registerLicenseRoutes(app: Express): void {
           lastPaymentAt: null,
           activatedAt:   null,
           expiresAt:     null,
+        })
+        .onConflictDoUpdate({
+          target: licenses.ownerId,
+          set: { status: "demo", demoEndsAt, graceEndsAt: null, updatedAt: now },
         })
         .returning();
     }
