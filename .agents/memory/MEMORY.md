@@ -20,3 +20,4 @@
 - [Cash Register Bug — calcCurrentTotal](cash-current-total-bug.md) — RESUELTO en refactorización financiera: toda la lógica migrada a calculateCashSummary(); dashboard KPIs también corregidos (filtro voided + desglose por método).
 - [Cuenta Corriente Phase 1](cuenta-corriente-phase1.md) — customer_accounts table (balance), require customer_id for "account" payment, adjustCustomerAccountBalance helper in inventory.ts.
 - [Stock Alert System](stock-alerts.md) — no persistent table; state computed from products.stock+stockMinimo; evaluateStockAlerts() pure fn; pendingAlerts pattern for transactions.
+- [Billing Phase 3](billing-phase3.md) — BillingBanner uses LicenseState (not business_settings); processPayment() in server/lib/payment.ts is the single payment fn; admin panel uses license dates (demoEndsAt/graceEndsAt/expiresAt) not billingCycleEnd; permanente rows hide all mutating actions.
