@@ -37,20 +37,26 @@ type FilterMode = LicenseStatus | "proximos" | "";
 
 function statusLabel(s: LicenseStatus) {
   const map: Record<LicenseStatus, string> = {
-    activa: "Activa",
-    pendiente: "Pendiente",
+    activa:     "Activa",
+    pendiente:  "Pendiente",
     suspendida: "Suspendida",
-    vencida: "Vencida",
+    vencida:    "Vencida",
+    demo:       "Demo",
+    gracia:     "Gracia",
+    permanente: "Permanente",
   };
   return map[s];
 }
 
 function StatusBadge({ status }: { status: LicenseStatus }) {
   const variants: Record<LicenseStatus, "default" | "secondary" | "destructive" | "outline"> = {
-    activa: "default",
-    pendiente: "outline",
+    activa:     "default",
+    pendiente:  "outline",
     suspendida: "destructive",
-    vencida: "secondary",
+    vencida:    "secondary",
+    demo:       "outline",
+    gracia:     "secondary",
+    permanente: "default",
   };
   return <Badge variant={variants[status]}>{statusLabel(status)}</Badge>;
 }

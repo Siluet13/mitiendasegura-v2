@@ -15,21 +15,22 @@
 export type LicenseStatus =
   | "activa"      // licencia activa pagada
   | "permanente"  // MASTER_ADMIN_ID — nunca bloqueable por ningún proceso
-  | "demo"        // período de demo gratuito (Fase 2)
-  | "gracia"      // período de gracia post-vencimiento (Fase 2)
+  | "demo"        // período de demo gratuito (15 días desde el primer login)
+  | "gracia"      // período de gracia post-demo (3 días)
   | "pendiente"   // cuenta creada, sin licencia asignada aún
   | "suspendida"  // bloqueada manualmente por admin
   | "vencida";    // venció sin renovar
 
 /**
  * Estados que conceden acceso pleno al sistema.
- * Fase 1: solo "activa" y "permanente".
- * Fase 2 agregará "demo" y "gracia" con su lógica de fechas.
+ * "demo" y "gracia" permiten uso completo mientras sus fechas estén vigentes.
+ * La validación de fechas ocurre en GET /api/license/status (única autoridad).
  */
 export const ACCESS_STATUSES: readonly LicenseStatus[] = [
   "activa",
   "permanente",
-  // "demo" y "gracia" se habilitarán en Fase 2
+  "demo",
+  "gracia",
 ];
 
 /**
