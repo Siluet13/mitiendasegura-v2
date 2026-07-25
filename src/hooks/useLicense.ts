@@ -73,7 +73,12 @@ export function useLicense() {
     retry: false,
     initialData: (): LicenseState | undefined => {
       if (typeof window === "undefined") return undefined;
-      return loadLicense() ?? undefined;
+      const cached = loadLicense();
+      // No usar "pendiente" como initialData: ese estado se convierte a "demo"
+      // en el primer call al servidor. Usarlo causaría un flash de "Acceso
+      // restringido" mientras el refetch completa.
+      if (cached?.status === "pendiente") return undefined;
+      return cached ?? undefined;
     },
     initialDataUpdatedAt: 0,
   });
