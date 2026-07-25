@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import {
   Pencil, Plus, Trash2, Search, Users, WifiOff,
   Wallet, TrendingUp, TrendingDown, RotateCcw, ArrowUpDown,
-  AlertCircle,
+  AlertCircle, Banknote, ArrowLeftRight,
 } from "lucide-react";
 import {
   createCustomer,
@@ -32,6 +32,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Dialog,
   DialogContent,
@@ -146,6 +147,7 @@ const paymentSchema = z.object({
     return Number.isFinite(n) && n > 0;
   }, "El importe debe ser mayor a cero"),
   observacion: z.string().trim().max(500).optional().or(z.literal("")),
+  payment_method: z.enum(["cash", "transfer"]),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -177,7 +179,7 @@ function RegisterPaymentDialog({
 }) {
   const form = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentSchema),
-    defaultValues: { amount: "", observacion: "" },
+    defaultValues: { amount: "", observacion: "", payment_method: "cash" },
   });
 
   const mut = useMutation({
@@ -192,11 +194,12 @@ function RegisterPaymentDialog({
       return registerCustomerPayment(customer.id, {
         amount,
         observacion: values.observacion?.trim() || null,
+        payment_method: values.payment_method,
       });
     },
     onSuccess: () => {
       toast.success("Pago registrado");
-      form.reset({ amount: "", observacion: "" });
+      form.reset({ amount: "", observacion: "", payment_method: "cash" });
       onOpenChange(false);
       onSuccess();
     },
@@ -205,7 +208,7 @@ function RegisterPaymentDialog({
 
   function handleClose() {
     if (mut.isPending) return;
-    form.reset({ amount: "", observacion: "" });
+    form.reset({ amount: "", observacion: "", payment_method: "cash" });
     onOpenChange(false);
   }
 
@@ -245,12 +248,36 @@ function RegisterPaymentDialog({
               </p>
             )}
           </div>
+          {/* Forma de pago */}
+          <div className="space-y-2">
+            <Label>Forma de pago <span className="text-destructive">*</span></Label>
+            <RadioGroup
+              value={form.watch("payment_method")}
+              onValueChange={(v) => form.setValue("payment_method", v as "cash" | "transfer")}
+              className="flex gap-4"
+            >
+              <div className="flex items-center gap-2 border rounded-lg px-3 py-2 cursor-pointer has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5 flex-1">
+                <RadioGroupItem value="cash" id="pm-cash" />
+                <Label htmlFor="pm-cash" className="flex items-center gap-1.5 cursor-pointer font-normal">
+                  <Banknote className="h-4 w-4 text-muted-foreground" />
+                  Efectivo
+                </Label>
+              </div>
+              <div className="flex items-center gap-2 border rounded-lg px-3 py-2 cursor-pointer has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5 flex-1">
+                <RadioGroupItem value="transfer" id="pm-transfer" />
+                <Label htmlFor="pm-transfer" className="flex items-center gap-1.5 cursor-pointer font-normal">
+                  <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
+                  Transferencia
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="pay-observacion">Observación (opcional)</Label>
             <Textarea
               id="pay-observacion"
               rows={2}
-              placeholder="Ej: pago parcial en efectivo"
+              placeholder="Ej: pago parcial"
               {...form.register("observacion")}
             />
           </div>
@@ -387,6 +414,13 @@ function CustomerAccountSheet({
                               <div className="min-w-0">
                                 <p className="text-sm font-medium leading-tight">{movementLabel(mv.type)}</p>
                                 <p className="text-xs text-muted-foreground mt-0.5">{fmtDateTime(mv.createdAt)}</p>
+                                {mv.type === "payment" && mv.paymentMethod && (
+                                  <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                                    {mv.paymentMethod === "cash"
+                                      ? <><Banknote className="h-3 w-3" /> Efectivo</>
+                                      : <><ArrowLeftRight className="h-3 w-3" /> Transferencia</>}
+                                  </p>
+                                )}
                                 {mv.observacion && (
                                   <p className="text-xs text-muted-foreground mt-0.5 italic truncate max-w-[200px]">
                                     {mv.observacion}

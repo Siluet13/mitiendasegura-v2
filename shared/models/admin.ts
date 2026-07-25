@@ -6,6 +6,9 @@ export const licenseStatusEnum = pgEnum("license_status", [
   "pendiente",
   "suspendida",
   "vencida",
+  "demo",
+  "gracia",
+  "permanente",
 ]);
 
 export const licenses = pgTable("licenses", {
@@ -16,12 +19,18 @@ export const licenses = pgTable("licenses", {
   expiresAt: timestamp("expires_at"),
   suspendedAt: timestamp("suspended_at"),
   notes: text("notes"),
+  // Fase 2: demo y gracia
+  demoEndsAt: timestamp("demo_ends_at"),
+  graceEndsAt: timestamp("grace_ends_at"),
+  // Historial de pagos
+  lastPaymentAt: timestamp("last_payment_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export type License = typeof licenses.$inferSelect;
-export type LicenseStatus = "activa" | "pendiente" | "suspendida" | "vencida";
+// Re-exportar desde shared/licensing para que todo el codebase use un único tipo
+export type { LicenseStatus } from "../licensing";
 
 export const adminLogs = pgTable("admin_logs", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),

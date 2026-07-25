@@ -1,6 +1,8 @@
 import express from "express";
 import { existsSync } from "fs";
 import { join } from "path";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { db } from "./db";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerInventoryRoutes } from "./api/inventory";
 import { registerDashboardRoutes } from "./api/dashboard";
@@ -40,6 +42,11 @@ if (existsSync(clientDir)) {
 }
 
 (async () => {
+  // Ejecutar migraciones antes de que setupAuth intente acceder a la tabla `sessions`.
+  // Esto garantiza que en una instalación limpia (BD vacía) todas las tablas
+  // existen antes de que connect-pg-simple las necesite.
+  await migrate(db, { migrationsFolder: "./migrations" });
+
   await setupAuth(app);
   app.use(resolveTenant);
   registerAuthRoutes(app);

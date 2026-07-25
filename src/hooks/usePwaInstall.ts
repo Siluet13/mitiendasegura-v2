@@ -15,6 +15,7 @@ interface PwaInstall {
 }
 
 function detectPlatform(): Platform {
+  if (typeof navigator === "undefined") return null;
   const ua = navigator.userAgent;
   if (/iphone|ipad|ipod/i.test(ua)) return "ios";
   if (/android/i.test(ua)) return "android";
@@ -23,9 +24,13 @@ function detectPlatform(): Platform {
 
 export function usePwaInstall(): PwaInstall {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+
+  // Guard against SSR: window is not available on the server
   const isStandalone =
-    window.matchMedia("(display-mode: standalone)").matches ||
-    ("standalone" in navigator && (navigator as { standalone?: boolean }).standalone === true);
+    typeof window !== "undefined" &&
+    (window.matchMedia("(display-mode: standalone)").matches ||
+      ("standalone" in navigator &&
+        (navigator as { standalone?: boolean }).standalone === true));
 
   useEffect(() => {
     const handler = (e: Event) => {

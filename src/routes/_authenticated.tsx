@@ -5,7 +5,6 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { useLicense } from "@/hooks/useLicense";
-import { useBilling } from "@/hooks/useBilling";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useTenantEvents } from "@/hooks/useTenantEvents";
 import { useReconnect } from "@/hooks/useReconnect";
@@ -15,6 +14,7 @@ import { log } from "@/lib/offline/logger";
 import { Button } from "@/components/ui/button";
 import { BillingBanner } from "@/components/BillingBanner";
 import { ShieldX, WifiOff } from "lucide-react";
+import { isLicenseActive } from "@shared/licensing";
 
 export const Route = createFileRoute("/_authenticated")({
   component: AuthenticatedLayout,
@@ -24,6 +24,8 @@ const licenseMessages: Record<string, string> = {
   pendiente: "Tu cuenta está pendiente de activación. Contactá al administrador para activar tu licencia.",
   suspendida: "Tu cuenta fue suspendida. Contactá al administrador para más información.",
   vencida: "Tu licencia venció. Contactá al administrador para renovarla.",
+  demo: "Tu período de demo ha vencido. Contactá al administrador para activar tu licencia.",
+  gracia: "Tu período de gracia ha vencido. Contactá al administrador para renovar tu licencia.",
 };
 
 function LicenseBlock({ status }: { status: string }) {
@@ -46,7 +48,6 @@ function LicenseBlock({ status }: { status: string }) {
 function AuthenticatedLayout() {
   const { user, loading } = useAuth();
   const { license, licenseLoading } = useLicense();
-  const { billing } = useBilling();
   const isOnline = useOnlineStatus();
   const qc = useQueryClient();
   useTenantEvents();
@@ -86,7 +87,12 @@ function AuthenticatedLayout() {
   }
   if (!user) return <Navigate to="/login" replace />;
 
-  if (license && license.status !== "activa") {
+  // ── GATE DE LICENCIA ────────────────────────────────────────────────────────
+  // isLicenseActive() centraliza la lógica. En Fase 1 pasan: "activa" y "permanente".
+  // "permanente" es exclusivo de MASTER_ADMIN_ID → nunca verá LicenseBlock.
+  // En Fase 2, "demo" y "gracia" se habilitarán aquí automáticamente al
+  // agregarlos a ACCESS_STATUSES en shared/licensing.ts.
+  if (license && !isLicenseActive(license.status)) {
     return <LicenseBlock status={license.status} />;
   }
 
@@ -104,7 +110,7 @@ function AuthenticatedLayout() {
               </span>
             )}
           </header>
-          <BillingBanner billing={billing} />
+          <BillingBanner license={license} />
           <main className="flex-1 p-6">
             <Outlet />
           </main>

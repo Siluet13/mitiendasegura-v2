@@ -55,6 +55,12 @@ export interface CashSession {
   sales_count: number;
   /** Desglose de transacciones por método de pago. */
   sales_by_payment_method: SalesByPaymentMethod;
+  /** Cobros de deuda de cuenta corriente recibidos en efectivo. */
+  account_payments_cash: number;
+  /** Cobros de deuda de cuenta corriente recibidos por transferencia. */
+  account_payments_transfer: number;
+  /** Total cobrado de cuentas corrientes (efectivo + transferencia). */
+  account_payments_total: number;
 }
 
 export async function getCashSession(): Promise<CashSession | null> {

@@ -1,0 +1,203 @@
+Necesito realizar una auditoría completa del módulo Billing/Licencias de Mi Tienda Segura.
+
+IMPORTANTE:
+NO modificar código.
+NO crear archivos.
+NO ejecutar migraciones.
+NO cambiar tablas.
+NO corregir errores todavía.
+
+Solo analizar el estado actual del sistema y generar un informe técnico.
+
+Objetivo:
+Determinar exactamente qué funcionalidades de Billing ya existen y qué falta implementar para soportar:
+
+- Demo gratuita de 15 días.
+- Período de gracia posterior al vencimiento.
+- Activación manual de suscripciones.
+- Avisos al usuario.
+- Gestión desde Panel Maestro.
+- Preparación futura para pagos automáticos.
+
+Auditar los siguientes puntos:
+
+=================================
+1) BASE DE DATOS
+=================================
+
+Revisar schema Drizzle y tablas relacionadas con:
+
+- licenses
+- users
+- tenants
+- cualquier tabla relacionada con planes, pagos o suscripciones.
+
+Informar:
+
+- Estructura actual.
+- Campos existentes.
+- Campos faltantes para un sistema demo + suscripción.
+- Relaciones entre tablas.
+
+No proponer cambios todavía, solo documentar.
+
+=================================
+2) CREACIÓN DE LICENCIAS
+=================================
+
+Encontrar dónde se crea una licencia cuando:
+
+- un usuario se registra.
+- se crea un tenant.
+- un administrador activa una cuenta.
+
+Documentar:
+
+- estado inicial asignado.
+- fechas configuradas.
+- valores por defecto.
+- flujo actual completo.
+
+=================================
+3) MIDDLEWARE DE CONTROL DE LICENCIA
+=================================
+
+Auditar:
+
+- server/index.ts
+- middleware relacionado con licencia.
+- rutas protegidas.
+
+Responder:
+
+- Qué estados permiten acceso.
+- Qué estados bloquean acceso.
+- Qué partes quedan disponibles cuando una licencia está vencida.
+
+Documentar el flujo actual.
+
+=================================
+4) API DE LICENCIA
+=================================
+
+Encontrar todos los endpoints relacionados con:
+
+license
+billing
+subscription
+payment
+
+Para cada endpoint indicar:
+
+- ruta.
+- método HTTP.
+- función.
+- quién puede acceder.
+- datos que devuelve.
+
+=================================
+5) FRONTEND
+=================================
+
+Buscar:
+
+- pantallas de licencia.
+- avisos de vencimiento.
+- pantallas de pago.
+- componentes relacionados con suscripción.
+
+Informar:
+
+- qué existe actualmente.
+- qué está conectado al backend.
+- qué está incompleto.
+- qué falta crear.
+
+=================================
+6) PANEL MAESTRO / ADMIN
+=================================
+
+Auditar las funciones administrativas relacionadas con licencias:
+
+- activar usuarios.
+- suspender.
+- cambiar fechas.
+- ver estado.
+
+Informar:
+
+- qué puede hacer actualmente un administrador.
+- qué controles faltan para gestionar demos y suscripciones.
+
+=================================
+7) FLUJO REAL ACTUAL
+=================================
+
+Crear un diagrama textual del flujo actual:
+
+Ejemplo:
+
+Registro usuario
+↓
+Creación licencia
+↓
+Estado inicial
+↓
+Acceso permitido/bloqueado
+↓
+Activación manual
+
+=================================
+8) COMPARACIÓN CONTRA OBJETIVO FUTURO
+=================================
+
+Comparar el sistema actual contra este flujo deseado:
+
+Usuario nuevo
+↓
+Demo automática 15 días
+↓
+Avisos antes del vencimiento
+↓
+Pago manual
+↓
+Activación de plan
+↓
+Suscripción activa
+↓
+Aviso de vencimiento
+↓
+Período de gracia
+↓
+Bloqueo
+
+Crear una tabla:
+
+TENEMOS | FALTA | PRIORIDAD
+
+=================================
+9) RECOMENDACIÓN DE IMPLEMENTACIÓN
+=================================
+
+Sin modificar código, proponer fases pequeñas:
+
+Fase 1:
+Demo + estados básicos
+
+Fase 2:
+Avisos
+
+Fase 3:
+Panel Maestro mejorado
+
+Fase 4:
+Pagos automáticos futuros
+
+Cada fase debe indicar:
+- archivos involucrados.
+- dificultad estimada.
+- riesgos.
+
+Recordar:
+Este es únicamente un informe de auditoría.
+No realizar ninguna modificación.

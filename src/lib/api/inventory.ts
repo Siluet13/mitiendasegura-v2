@@ -56,6 +56,7 @@ export type CustomerAccountMovement = {
   amount: string;
   balanceAfter: string;
   observacion: string | null;
+  paymentMethod: string | null;
   createdAt: string;
 };
 
@@ -252,7 +253,7 @@ export async function getCustomerAccount(id: string): Promise<CustomerAccountDat
 
 export async function registerCustomerPayment(
   id: string,
-  input: { amount: number; observacion?: string | null },
+  input: { amount: number; observacion?: string | null; payment_method: "cash" | "transfer" },
 ): Promise<{ ok: boolean }> {
   return apiFetch(`/api/customers/${id}/payment`, {
     method: "POST",

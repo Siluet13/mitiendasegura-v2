@@ -22,6 +22,9 @@ export interface BusinessRow {
   licenseStatus: LicenseStatus;
   licenseActivatedAt: string | null;
   licenseExpiresAt: string | null;
+  licenseDemoEndsAt: string | null;
+  licenseGraceEndsAt: string | null;
+  licenseLastPaymentAt: string | null;
   licenseNotes: string | null;
   nombreNegocio: string | null;
   billingCycleStart: string | null;
@@ -44,6 +47,9 @@ export interface BusinessDetail {
   licenseActivatedAt: string | null;
   licenseExpiresAt: string | null;
   licenseSuspendedAt: string | null;
+  licenseDemoEndsAt: string | null;
+  licenseGraceEndsAt: string | null;
+  licenseLastPaymentAt: string | null;
   licenseNotes: string | null;
   nombreNegocio: string | null;
   billingCycleStart: string | null;

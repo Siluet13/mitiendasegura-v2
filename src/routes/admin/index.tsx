@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { listBusinesses, updateLicense, registerPayment } from "@/lib/api/admin";
 import type { BusinessRow } from "@/lib/api/admin";
 import type { LicenseStatus } from "@/hooks/useLicense";
-import { getBillingStatus } from "@shared/billing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,22 +36,43 @@ type FilterMode = LicenseStatus | "proximos" | "";
 
 function statusLabel(s: LicenseStatus) {
   const map: Record<LicenseStatus, string> = {
-    activa: "Activa",
-    pendiente: "Pendiente",
+    activa:     "Activa",
+    pendiente:  "Pendiente",
     suspendida: "Suspendida",
-    vencida: "Vencida",
+    vencida:    "Vencida",
+    demo:       "Demo",
+    gracia:     "Gracia",
+    permanente: "Permanente",
   };
   return map[s];
 }
 
+/** Dot indicator según estado — mismo criterio que el sidebar */
+const STATUS_DOT: Record<LicenseStatus, string> = {
+  permanente: "🟣",
+  activa:     "🟢",
+  demo:       "🔵",
+  gracia:     "🟡",
+  vencida:    "🔴",
+  suspendida: "🔴",
+  pendiente:  "⚪",
+};
+
 function StatusBadge({ status }: { status: LicenseStatus }) {
   const variants: Record<LicenseStatus, "default" | "secondary" | "destructive" | "outline"> = {
-    activa: "default",
-    pendiente: "outline",
+    activa:     "default",
+    pendiente:  "outline",
     suspendida: "destructive",
-    vencida: "secondary",
+    vencida:    "secondary",
+    demo:       "outline",
+    gracia:     "secondary",
+    permanente: "default",
   };
-  return <Badge variant={variants[status]}>{statusLabel(status)}</Badge>;
+  return (
+    <Badge variant={variants[status]}>
+      {STATUS_DOT[status]} {statusLabel(status)}
+    </Badge>
+  );
 }
 
 function fmt(date: string | null | undefined) {
@@ -60,14 +80,28 @@ function fmt(date: string | null | undefined) {
   return new Date(date).toLocaleDateString("es-AR");
 }
 
+/**
+ * Calcula los días restantes usando la fecha autoritativa de licenses,
+ * según el estado actual (no billingCycleEnd de business_settings).
+ */
 function daysLeftForRow(b: BusinessRow): number | null {
-  if (!b.billingCycleEnd) return null;
-  const billing = getBillingStatus({
-    billing_cycle_start: b.billingCycleStart,
-    billing_cycle_end: b.billingCycleEnd,
-    last_payment_date: b.lastPaymentDate,
-  });
-  return billing.daysLeft;
+  let dateStr: string | null = null;
+
+  if (b.licenseStatus === "activa" && b.licenseExpiresAt) {
+    dateStr = b.licenseExpiresAt;
+  } else if (b.licenseStatus === "demo" && b.licenseDemoEndsAt) {
+    dateStr = b.licenseDemoEndsAt;
+  } else if (b.licenseStatus === "gracia" && b.licenseGraceEndsAt) {
+    dateStr = b.licenseGraceEndsAt;
+  } else if (b.billingCycleEnd) {
+    // fallback visual para filas sin datos de licenses
+    dateStr = b.billingCycleEnd;
+  }
+
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  return Math.ceil((d.getTime() - Date.now()) / 86_400_000);
 }
 
 function DaysLeftCell({ b }: { b: BusinessRow }) {
@@ -76,6 +110,19 @@ function DaysLeftCell({ b }: { b: BusinessRow }) {
   if (days <= 0) return <span className="font-medium text-destructive">Vencido</span>;
   if (days <= 5) return <span className="font-medium text-yellow-600">{days}d</span>;
   return <span>{days}d</span>;
+}
+
+/** Fecha de vencimiento autoritative según estado de licencia */
+function expiryDateForRow(b: BusinessRow): string | null {
+  if (b.licenseStatus === "activa") return b.licenseExpiresAt;
+  if (b.licenseStatus === "demo") return b.licenseDemoEndsAt;
+  if (b.licenseStatus === "gracia") return b.licenseGraceEndsAt;
+  return b.billingCycleEnd; // fallback
+}
+
+/** Devuelve true si la fila pertenece al admin permanente — no se puede modificar */
+function isPermanent(b: BusinessRow): boolean {
+  return b.licenseStatus === "permanente";
 }
 
 function AdminIndex() {
@@ -112,8 +159,9 @@ function AdminIndex() {
   const isPending = licenseMut.isPending || paymentMut.isPending;
 
   const proximos = businesses.filter((b) => {
+    if (isPermanent(b)) return false;
     const d = daysLeftForRow(b);
-    return d !== null && d > 0 && d <= 5 && b.licenseStatus === "activa";
+    return d !== null && d > 0 && d <= 5;
   });
 
   const filtered = businesses.filter((b) => {
@@ -126,7 +174,7 @@ function AdminIndex() {
     let matchFilter = true;
     if (filterMode === "proximos") {
       const d = daysLeftForRow(b);
-      matchFilter = d !== null && d > 0 && d <= 5 && b.licenseStatus === "activa";
+      matchFilter = !isPermanent(b) && d !== null && d > 0 && d <= 5;
     } else if (filterMode) {
       matchFilter = b.licenseStatus === filterMode;
     }
@@ -168,8 +216,8 @@ function AdminIndex() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-          {(["activa", "pendiente", "suspendida", "vencida"] as LicenseStatus[]).map((s) => (
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-4">
+          {(["activa", "demo", "gracia", "pendiente", "suspendida", "vencida"] as LicenseStatus[]).map((s) => (
             <Card
               key={s}
               className={`cursor-pointer hover:border-primary/50 transition-colors ${filterMode === s ? "border-primary" : ""}`}
@@ -179,7 +227,9 @@ function AdminIndex() {
                 <div className="text-2xl font-bold">
                   {businesses.filter((b) => b.licenseStatus === s).length}
                 </div>
-                <div className="text-sm text-muted-foreground capitalize">{statusLabel(s)}</div>
+                <div className="text-sm text-muted-foreground">
+                  {STATUS_DOT[s]} {statusLabel(s)}
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -217,9 +267,9 @@ function AdminIndex() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                   <DropdownMenuItem onClick={() => setFilterMode("")}>Todos</DropdownMenuItem>
-                  {(["activa", "pendiente", "suspendida", "vencida"] as LicenseStatus[]).map((s) => (
+                  {(["activa", "demo", "gracia", "pendiente", "suspendida", "vencida"] as LicenseStatus[]).map((s) => (
                     <DropdownMenuItem key={s} onClick={() => setFilterMode(s)}>
-                      {statusLabel(s)}
+                      {STATUS_DOT[s]} {statusLabel(s)}
                     </DropdownMenuItem>
                   ))}
                   <DropdownMenuSeparator />
@@ -269,77 +319,86 @@ function AdminIndex() {
                         <TableCell>
                           <StatusBadge status={b.licenseStatus} />
                         </TableCell>
-                        <TableCell className="text-sm">{fmt(b.billingCycleEnd)}</TableCell>
+                        <TableCell className="text-sm">{fmt(expiryDateForRow(b))}</TableCell>
                         <TableCell className="text-right text-sm">
-                          <DaysLeftCell b={b} />
+                          {isPermanent(b)
+                            ? <span className="text-muted-foreground">∞</span>
+                            : <DaysLeftCell b={b} />
+                          }
                         </TableCell>
-                        <TableCell className="text-sm">{fmt(b.lastPaymentDate)}</TableCell>
+                        <TableCell className="text-sm">
+                          {fmt(b.licenseLastPaymentAt ?? b.lastPaymentDate)}
+                        </TableCell>
                         <TableCell className="text-sm">{fmt(b.registeredAt)}</TableCell>
                         <TableCell className="text-right text-sm">{b.productCount}</TableCell>
                         <TableCell className="text-right text-sm">{b.saleCount}</TableCell>
                         <TableCell className="text-right text-sm">{b.customerCount}</TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="outline" size="sm" disabled={isPending}>
-                                Acción <ChevronDown className="h-3 w-3 ml-1" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() => setSelectedOwnerId(b.ownerId)}
-                              >
-                                Ver ficha
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => paymentMut.mutate(b.ownerId)}
-                                className="gap-2"
-                              >
-                                <CreditCard className="h-3.5 w-3.5" />
-                                Registrar pago
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              {b.licenseStatus !== "activa" && (
+                          {isPermanent(b) ? (
+                            <span className="text-xs text-muted-foreground px-2">Admin</span>
+                          ) : (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm" disabled={isPending}>
+                                  Acción <ChevronDown className="h-3 w-3 ml-1" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
                                 <DropdownMenuItem
-                                  onClick={() =>
-                                    licenseMut.mutate({ ownerId: b.ownerId, status: "activa" })
-                                  }
+                                  onClick={() => setSelectedOwnerId(b.ownerId)}
                                 >
-                                  Activar
+                                  Ver ficha
                                 </DropdownMenuItem>
-                              )}
-                              {(b.licenseStatus === "suspendida" || b.licenseStatus === "vencida") && (
+                                <DropdownMenuSeparator />
                                 <DropdownMenuItem
-                                  onClick={() =>
-                                    licenseMut.mutate({ ownerId: b.ownerId, status: "activa" })
-                                  }
+                                  onClick={() => paymentMut.mutate(b.ownerId)}
+                                  className="gap-2"
                                 >
-                                  Reactivar
+                                  <CreditCard className="h-3.5 w-3.5" />
+                                  Registrar pago
                                 </DropdownMenuItem>
-                              )}
-                              {b.licenseStatus === "activa" && (
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    licenseMut.mutate({ ownerId: b.ownerId, status: "suspendida" })
-                                  }
-                                  className="text-destructive focus:text-destructive"
-                                >
-                                  Suspender
-                                </DropdownMenuItem>
-                              )}
-                              {b.licenseStatus === "activa" && (
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    licenseMut.mutate({ ownerId: b.ownerId, status: "vencida" })
-                                  }
-                                  className="text-destructive focus:text-destructive"
-                                >
-                                  Marcar vencida
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                                <DropdownMenuSeparator />
+                                {b.licenseStatus !== "activa" && (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      licenseMut.mutate({ ownerId: b.ownerId, status: "activa" })
+                                    }
+                                  >
+                                    Activar
+                                  </DropdownMenuItem>
+                                )}
+                                {(b.licenseStatus === "suspendida" || b.licenseStatus === "vencida") && (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      licenseMut.mutate({ ownerId: b.ownerId, status: "activa" })
+                                    }
+                                  >
+                                    Reactivar
+                                  </DropdownMenuItem>
+                                )}
+                                {b.licenseStatus === "activa" && (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      licenseMut.mutate({ ownerId: b.ownerId, status: "suspendida" })
+                                    }
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    Suspender
+                                  </DropdownMenuItem>
+                                )}
+                                {b.licenseStatus === "activa" && (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      licenseMut.mutate({ ownerId: b.ownerId, status: "vencida" })
+                                    }
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    Marcar vencida
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

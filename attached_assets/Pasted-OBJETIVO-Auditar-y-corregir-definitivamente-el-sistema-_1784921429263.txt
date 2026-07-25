@@ -1,0 +1,80 @@
+OBJETIVO
+
+Auditar y corregir definitivamente el sistema de migraciones para que el proyecto pueda importarse y ejecutarse correctamente en cualquier cuenta nueva de Replit utilizando únicamente:
+
+- git clone del repositorio
+- provisión de una PostgreSQL nueva
+- bunx drizzle-kit migrate
+
+SIN necesidad de ejecutar SQL manual ni modificar la base de datos a mano.
+
+PROBLEMA
+
+Actualmente, al importar el proyecto en una cuenta nueva:
+
+- bunx drizzle-kit migrate queda indefinidamente en "applying migrations..."
+- no devuelve error
+- la tabla __drizzle_migrations no llega a crearse
+- luego la aplicación falla en el login con errores como:
+  relation "sessions" does not exist
+
+IMPORTANTE
+
+No asumir que el problema es una migración específica.
+
+Quiero una auditoría completa del sistema de migraciones.
+
+AUDITAR
+
+1. drizzle.config.ts
+
+2. shared/schema.ts
+
+3. Todas las migraciones 0000 hasta la última.
+
+4. migrations/meta/_journal.json
+
+5. Compatibilidad entre el schema actual y las migraciones.
+
+6. Orden de creación de tablas, enums, índices y foreign keys.
+
+7. Cualquier SQL que pueda bloquear una transacción.
+
+8. Cualquier ALTER o CREATE INDEX que pueda quedar esperando locks.
+
+9. Verificar que cada migración pueda ejecutarse sobre una base completamente vacía.
+
+10. Verificar que ninguna migración dependa de columnas creadas en migraciones posteriores.
+
+11. Verificar que ninguna migración intente migrar datos que todavía no pueden existir.
+
+12. Revisar el uso de statement-breakpoint.
+
+13. Confirmar que el historial del journal coincida exactamente con los archivos presentes.
+
+14. Detectar cualquier incompatibilidad conocida entre drizzle-kit y PostgreSQL/Replit.
+
+NO HACER
+
+- No eliminar tablas.
+- No modificar el modelo de datos.
+- No hacer cambios funcionales.
+- No cambiar endpoints.
+- No tocar frontend.
+
+SOLO solucionar el sistema de migraciones.
+
+ENTREGABLE
+
+Antes de modificar nada, explicar exactamente cuál es la causa raíz encontrada.
+
+Después realizar únicamente los cambios necesarios.
+
+Al finalizar verificar que:
+
+- bunx drizzle-kit migrate termina correctamente.
+- __drizzle_migrations se crea.
+- Las tablas esperadas existen.
+- El login funciona en una instalación completamente nueva.
+
+El objetivo es que cualquier persona pueda clonar el repositorio, crear una PostgreSQL nueva, ejecutar migrate y tener la aplicación funcionando sin intervención manual.

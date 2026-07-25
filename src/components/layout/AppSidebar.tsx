@@ -33,6 +33,8 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { usePendingOps } from "@/hooks/usePendingOps";
+import { useLicense } from "@/hooks/useLicense";
+import type { LicenseStatus } from "@/hooks/useLicense";
 
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -50,6 +52,29 @@ const ADMIN_ITEMS = [
   { title: "Panel Maestro", url: "/admin", icon: Building2 },
   { title: "Diagnóstico Offline", url: "/admin/offline-debug", icon: Bug },
 ] as const;
+
+/** Indicador visual del estado de licencia. Solo un emoji + etiqueta. */
+const LICENSE_INDICATOR: Record<LicenseStatus, { dot: string; label: string }> = {
+  permanente: { dot: "🟣", label: "Permanente" },
+  activa:     { dot: "🟢", label: "Activa" },
+  demo:       { dot: "🔵", label: "Demo" },
+  gracia:     { dot: "🟡", label: "Gracia" },
+  vencida:    { dot: "🔴", label: "Vencida" },
+  suspendida: { dot: "🔴", label: "Suspendida" },
+  pendiente:  { dot: "⚪", label: "Pendiente" },
+};
+
+function LicenseIndicator() {
+  const { license } = useLicense();
+  if (!license) return null;
+  const cfg = LICENSE_INDICATOR[license.status];
+  return (
+    <div className="px-2 pb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span>{cfg.dot}</span>
+      <span>{cfg.label}</span>
+    </div>
+  );
+}
 
 export function AppSidebar() {
   const { user } = useAuth();
@@ -118,6 +143,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
+        <LicenseIndicator />
         <div className="px-2 pb-2 text-xs text-muted-foreground truncate">
           {user?.email ?? user?.firstName ?? ""}
         </div>

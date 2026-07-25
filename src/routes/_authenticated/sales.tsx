@@ -171,93 +171,99 @@ function CashRegisterBar({
 
       {/* ── Cerrar caja modal ──────────────────────────────────────────── */}
       <Dialog open={closeModal} onOpenChange={setCloseModal}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-4 w-4" /> Cerrar Caja
             </DialogTitle>
           </DialogHeader>
-          <div className="py-2 space-y-2 text-sm text-muted-foreground">
-            <p>¿Confirmás el cierre de caja?</p>
-            {session && (
-              <div className="rounded-md border p-3 space-y-1.5 text-foreground text-sm">
-                {/* Monto inicial */}
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Monto inicial</span>
-                  <span className="tabular-nums">{fmt(Number(session.initial_amount))}</span>
-                </div>
 
-                {/* Desglose cobrado */}
-                <div className="border-t pt-1.5 space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Efectivo</span>
-                    <span className="tabular-nums">{fmt(session.cash_total ?? 0)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Transferencias</span>
-                    <span className="tabular-nums">{fmt(session.transfer_total ?? 0)}</span>
-                  </div>
-                  <div className="flex justify-between font-semibold">
-                    <span>Total cobrado</span>
-                    <span className="tabular-nums">{fmt(session.current_total)}</span>
-                  </div>
-                </div>
+          {session && (() => {
+            const initialAmt       = Number(session.initial_amount);
+            const salesCash        = session.cash_total ?? 0;
+            const salesTransfer    = session.transfer_total ?? 0;
+            const salesAccount     = session.account_total ?? 0;
+            const totalSales       = session.net_sales ?? 0;
+            const ccCash           = session.account_payments_cash ?? 0;
+            const ccTransfer       = session.account_payments_transfer ?? 0;
+            const totalCC          = ccCash + ccTransfer;
+            const totalEfectivo    = initialAmt + salesCash + ccCash;
+            const totalTransfer    = salesTransfer + ccTransfer;
+            const totalFinal       = initialAmt + session.current_total;
 
-                {/* Cuenta corriente (solo si hay) */}
-                {(session.account_total ?? 0) > 0 && (
-                  <div className="border-t pt-1 flex justify-between text-muted-foreground">
-                    <span>Cta. corriente</span>
-                    <span className="tabular-nums">{fmt(session.account_total ?? 0)}</span>
-                  </div>
-                )}
-
-                {/* Ventas brutas (si difiere del cobrado) */}
-                {(session.net_sales ?? 0) !== session.current_total && (
-                  <div className="flex justify-between text-muted-foreground text-xs">
-                    <span>Total ventas (bruto)</span>
-                    <span className="tabular-nums">{fmt(session.net_sales ?? 0)}</span>
-                  </div>
-                )}
-
-                {/* Total en caja final */}
-                <div className="border-t pt-1.5 flex justify-between font-bold text-base">
-                  <span>Total en caja</span>
-                  <span className="tabular-nums">{fmt(Number(session.initial_amount) + session.current_total)}</span>
-                </div>
-
-                {/* Cantidad de ventas por método */}
-                {session.sales_count > 0 && (
-                  <div className="border-t pt-1 text-xs text-muted-foreground space-y-0.5">
-                    <p className="font-medium">Ventas por método ({session.sales_count} total)</p>
-                    {(session.sales_by_payment_method?.cash ?? 0) > 0 && (
-                      <div className="flex justify-between">
-                        <span>Efectivo</span>
-                        <span>{session.sales_by_payment_method.cash}</span>
-                      </div>
-                    )}
-                    {(session.sales_by_payment_method?.transfer ?? 0) > 0 && (
-                      <div className="flex justify-between">
-                        <span>Transferencia</span>
-                        <span>{session.sales_by_payment_method.transfer}</span>
-                      </div>
-                    )}
-                    {(session.sales_by_payment_method?.account ?? 0) > 0 && (
-                      <div className="flex justify-between">
-                        <span>Cta. corriente</span>
-                        <span>{session.sales_by_payment_method.account}</span>
-                      </div>
-                    )}
-                    {(session.sales_by_payment_method?.mixed ?? 0) > 0 && (
-                      <div className="flex justify-between">
-                        <span>Mixto</span>
-                        <span>{session.sales_by_payment_method.mixed}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+            const Row = ({ label, value, muted = false, bold = false }: {
+              label: string; value: number; muted?: boolean; bold?: boolean;
+            }) => (
+              <div className={[
+                "flex justify-between",
+                muted ? "text-muted-foreground" : "",
+                bold  ? "font-semibold" : "",
+              ].join(" ")}>
+                <span>{label}</span>
+                <span className="tabular-nums">{fmt(value)}</span>
               </div>
-            )}
-          </div>
+            );
+
+            return (
+              <div className="py-1 space-y-3 text-sm">
+
+                {/* ── 1. Ventas del día ─────────────────────────────────── */}
+                <div className="rounded-md border overflow-hidden">
+                  <div className="bg-muted/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    1 · Ventas del día
+                  </div>
+                  <div className="px-3 py-2 space-y-1.5">
+                    <Row label="Efectivo"          value={salesCash}     muted />
+                    <Row label="Transferencia"     value={salesTransfer} muted />
+                    <Row label="Cuenta corriente"  value={salesAccount}  muted />
+                    <div className="border-t pt-1.5">
+                      <Row label="Total ventas" value={totalSales} bold />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── 2. Cobros de cuenta corriente ─────────────────────── */}
+                <div className="rounded-md border overflow-hidden">
+                  <div className="bg-muted/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    2 · Cobros de cuenta corriente
+                  </div>
+                  <div className="px-3 py-2 space-y-1.5">
+                    <Row label="Cobros en efectivo"       value={ccCash}     muted />
+                    <Row label="Cobros por transferencia" value={ccTransfer} muted />
+                    <div className="border-t pt-1.5">
+                      <Row label="Total cobros CC" value={totalCC} bold />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── 3. Resumen de caja ────────────────────────────────── */}
+                <div className="rounded-md border overflow-hidden">
+                  <div className="bg-muted/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    3 · Resumen de caja
+                  </div>
+                  <div className="px-3 py-2 space-y-1.5">
+                    <Row label="Monto inicial"               value={initialAmt}    muted />
+                    <Row label="+ Efectivo por ventas"       value={salesCash}     muted />
+                    <Row label="+ Efectivo por cobros CC"    value={ccCash}        muted />
+                    <div className="border-t pt-1.5">
+                      <Row label="= Total efectivo esperado" value={totalEfectivo} bold />
+                    </div>
+                    <div className="pt-0.5">
+                      <Row label="Transferencias recibidas"  value={totalTransfer} muted />
+                    </div>
+                    <div className="border-t pt-1.5">
+                      <div className="flex justify-between font-bold text-base">
+                        <span>Total final</span>
+                        <span className="tabular-nums">{fmt(totalFinal)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            );
+          })()}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setCloseModal(false)}>Cancelar</Button>
             <Button variant="destructive" onClick={() => closeMut.mutate()} disabled={closeMut.isPending}>

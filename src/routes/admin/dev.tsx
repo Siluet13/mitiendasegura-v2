@@ -141,6 +141,9 @@ const LICENSE_VARIANTS: Record<string, "default" | "secondary" | "destructive" |
   pendiente: "outline",
   suspendida: "destructive",
   vencida: "secondary",
+  demo: "outline",
+  gracia: "outline",
+  permanente: "default",
 };
 
 const LICENSE_LABELS: Record<string, string> = {
@@ -148,6 +151,9 @@ const LICENSE_LABELS: Record<string, string> = {
   pendiente: "Pendiente",
   suspendida: "Suspendida",
   vencida: "Vencida",
+  demo: "Demo",
+  gracia: "Gracia",
+  permanente: "Permanente",
 };
 
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {

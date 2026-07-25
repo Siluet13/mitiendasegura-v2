@@ -50,6 +50,27 @@
       "when": 1753228800000,
       "tag": "0006_stock_movements_void_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1753315200000,
+      "tag": "0007_account_payments_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1753401600000,
+      "tag": "0008_missing_tables_and_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784937600000,
+      "tag": "0009_license_new_fields",
+      "breakpoints": true
     }
   ]
 }

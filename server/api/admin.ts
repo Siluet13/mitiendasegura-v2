@@ -7,8 +7,7 @@ import type { LicenseStatus } from "@shared/schema";
 import { wrapAsync } from "../lib/asyncHandler";
 import { broadcast } from "../lib/events";
 import { logEvent } from "../lib/logger";
-
-const CYCLE_DAYS = 30;
+import { processPayment } from "../lib/payment";
 
 const isAdmin: RequestHandler = (req, res, next) => {
   const user = req.user as any;
@@ -47,6 +46,8 @@ export function registerAdminRoutes(app: Express): void {
     res.json({ isAdmin: isAdminUser });
   });
 
+  // ── GET /api/admin/businesses ───────────────────────────────────────────────
+  // Incluye demoEndsAt, graceEndsAt y lastPaymentAt desde licenses (fuente de verdad).
   app.get("/api/admin/businesses", isAuthenticated, isAdmin, async (_req, res) => {
     const businessList = await db
       .select({
@@ -58,6 +59,9 @@ export function registerAdminRoutes(app: Express): void {
         licenseStatus: licenses.status,
         licenseActivatedAt: licenses.activatedAt,
         licenseExpiresAt: licenses.expiresAt,
+        licenseDemoEndsAt: licenses.demoEndsAt,
+        licenseGraceEndsAt: licenses.graceEndsAt,
+        licenseLastPaymentAt: licenses.lastPaymentAt,
         licenseNotes: licenses.notes,
         nombreNegocio: businessSettings.nombreNegocio,
         billingCycleStart: businessSettings.billingCycleStart,
@@ -81,6 +85,9 @@ export function registerAdminRoutes(app: Express): void {
         licenses.status,
         licenses.activatedAt,
         licenses.expiresAt,
+        licenses.demoEndsAt,
+        licenses.graceEndsAt,
+        licenses.lastPaymentAt,
         licenses.notes,
         businessSettings.nombreNegocio,
         businessSettings.billingCycleStart,
@@ -114,6 +121,7 @@ export function registerAdminRoutes(app: Express): void {
     res.json(result);
   });
 
+  // ── GET /api/admin/businesses/:ownerId ─────────────────────────────────────
   app.get("/api/admin/businesses/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
     const ownerId = String(req.params.ownerId);
 
@@ -128,6 +136,9 @@ export function registerAdminRoutes(app: Express): void {
         licenseActivatedAt: licenses.activatedAt,
         licenseExpiresAt: licenses.expiresAt,
         licenseSuspendedAt: licenses.suspendedAt,
+        licenseDemoEndsAt: licenses.demoEndsAt,
+        licenseGraceEndsAt: licenses.graceEndsAt,
+        licenseLastPaymentAt: licenses.lastPaymentAt,
         licenseNotes: licenses.notes,
         nombreNegocio: businessSettings.nombreNegocio,
         billingCycleStart: businessSettings.billingCycleStart,
@@ -150,8 +161,15 @@ export function registerAdminRoutes(app: Express): void {
     });
   }));
 
+  // ── PUT /api/admin/businesses/:ownerId ─────────────────────────────────────
   app.put("/api/admin/businesses/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
     const ownerId = String(req.params.ownerId);
+
+    // MASTER_ADMIN_ID: licencia permanente, no se puede modificar desde el panel
+    if (ownerId === process.env.MASTER_ADMIN_ID) {
+      return res.status(403).json({ message: "Los datos del administrador no pueden ser modificados desde el panel" });
+    }
+
     const { nombreNegocio, billingCycleEnd } = req.body as {
       nombreNegocio?: string;
       billingCycleEnd?: string | null;
@@ -193,15 +211,22 @@ export function registerAdminRoutes(app: Express): void {
     res.json({ ok: true });
   }));
 
+  // ── PUT /api/admin/licenses/:ownerId ───────────────────────────────────────
   app.put("/api/admin/licenses/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
     const ownerId = String(req.params.ownerId);
+
+    // MASTER_ADMIN_ID tiene licencia "permanente" — no puede ser modificada por nadie
+    if (ownerId === process.env.MASTER_ADMIN_ID) {
+      return res.status(403).json({ message: "La licencia del administrador no puede ser modificada" });
+    }
+
     const { status, notes, expiresAt } = req.body as {
       status: LicenseStatus;
       notes?: string;
       expiresAt?: string | null;
     };
 
-    const valid: LicenseStatus[] = ["activa", "pendiente", "suspendida", "vencida"];
+    const valid: LicenseStatus[] = ["activa", "pendiente", "suspendida", "vencida", "demo", "gracia"];
     if (!valid.includes(status)) {
       return res.status(400).json({ message: "Estado inválido" });
     }
@@ -260,49 +285,22 @@ export function registerAdminRoutes(app: Express): void {
     });
   }));
 
+  // ── POST /api/admin/billing/payment/:ownerId ────────────────────────────────
+  // Usa processPayment() como función central — no duplica lógica de billing.
   app.post("/api/admin/billing/payment/:ownerId", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
     const ownerId = String(req.params.ownerId);
-    const now = new Date();
-    const end = new Date(now.getTime() + CYCLE_DAYS * 24 * 60 * 60 * 1000);
 
-    await db
-      .insert(businessSettings)
-      .values({
-        ownerId,
-        nombreNegocio: "",
-        lastPaymentDate: now,
-        billingCycleStart: now,
-        billingCycleEnd: end,
-        subscriptionStatus: "active",
-      })
-      .onConflictDoUpdate({
-        target: businessSettings.ownerId,
-        set: {
-          lastPaymentDate: now,
-          billingCycleStart: now,
-          billingCycleEnd: end,
-          subscriptionStatus: "active",
-          updatedAt: now,
-        },
-      });
+    // MASTER_ADMIN_ID tiene licencia permanente — no necesita ciclos de billing
+    if (ownerId === process.env.MASTER_ADMIN_ID) {
+      return res.status(403).json({ message: "El administrador tiene licencia permanente y no requiere registrar pagos" });
+    }
 
-    await db
-      .insert(licenses)
-      .values({ ownerId, status: "activa", activatedAt: now, expiresAt: end })
-      .onConflictDoUpdate({
-        target: licenses.ownerId,
-        set: {
-          status: "activa" as LicenseStatus,
-          activatedAt: now,
-          expiresAt: end,
-          updatedAt: now,
-        },
-      });
+    const callerUserId = (req as any).user?.claims?.sub ?? null;
+    const result = await processPayment(ownerId, callerUserId);
 
     await broadcastToTenant(ownerId, ["settings", "business_settings"]);
-    logEvent({ module: "admin", event: "ADMIN_PAYMENT_REGISTERED", message: "Pago registrado por admin", ownerId, userId: (req as any).user?.claims?.sub ?? null, details: { cycleEnd: end.toISOString(), targetOwnerId: ownerId } });
 
-    res.json({ ok: true });
+    res.json({ ok: true, expiresAt: result.expiresAt.toISOString(), lastPaymentAt: result.lastPaymentAt.toISOString() });
   }));
 
   app.get("/api/admin/logs", isAuthenticated, isAdmin, wrapAsync(async (req, res) => {
