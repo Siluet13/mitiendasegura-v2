@@ -94,6 +94,7 @@ export interface ImportEntityPayload {
 
 export interface EntityImportResult {
   imported: number;
+  updated: number;
   skipped: number;
   errors: { row: number; reason: string }[];
 }

@@ -1,5 +1,10 @@
 import type { Express } from "express";
 import { eq, inArray } from "drizzle-orm";
+
+/** Normaliza un string para búsquedas: minúsculas, sin espacios extremos. */
+function normalizeKey(s: string): string {
+  return s.toLowerCase().trim();
+}
 import { db } from "../db";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { requireTenant } from "../lib/context";
@@ -308,26 +313,32 @@ export function registerBackupRoutes(app: Express): void {
 
     const { categories: catRows, products: prodRows, customers: custRows } = req.body ?? {};
 
-    interface EntityResult { imported: number; skipped: number; errors: { row: number; reason: string }[] }
+    interface EntityResult { imported: number; updated: number; skipped: number; errors: { row: number; reason: string }[] }
     const results: Record<string, EntityResult> = {};
 
+    // ── CATEGORÍAS ────────────────────────────────────────────────────────────
+    // Comportamiento: reutilizar si ya existe (por nombre normalizado), crear si no.
+    // Las categorías no se actualizan — solo tienen un campo (nombre).
     if (Array.isArray(catRows) && catRows.length > 0) {
-      const result: EntityResult = { imported: 0, skipped: 0, errors: [] };
+      const result: EntityResult = { imported: 0, updated: 0, skipped: 0, errors: [] };
       try {
-        const existingCats = await db.select({ nombre: categories.nombre }).from(categories).where(eq(categories.tenantId, tenantId));
-        const existingNames = new Set(existingCats.map((c) => c.nombre.toLowerCase().trim()));
+        const existingCats = await db
+          .select({ id: categories.id, nombre: categories.nombre })
+          .from(categories)
+          .where(eq(categories.tenantId, tenantId));
+        const nameToId = new Map(existingCats.map((c) => [normalizeKey(c.nombre), c.id]));
 
         for (let i = 0; i < catRows.length; i++) {
           const row = catRows[i] as { nombre?: string };
           const nombre = String(row.nombre ?? "").trim();
           if (!nombre) { result.errors.push({ row: i + 2, reason: "Nombre vacío" }); continue; }
-          if (existingNames.has(nombre.toLowerCase())) { result.skipped++; continue; }
+          if (nameToId.has(normalizeKey(nombre))) { result.skipped++; continue; }
           try {
-            await db.insert(categories).values({ ownerId: userId, tenantId, nombre });
-            existingNames.add(nombre.toLowerCase());
+            const [newCat] = await db.insert(categories).values({ ownerId: userId, tenantId, nombre }).returning({ id: categories.id });
+            nameToId.set(normalizeKey(nombre), newCat.id);
             result.imported++;
           } catch (e: any) {
-            result.errors.push({ row: i + 2, reason: e?.message ?? "Error al insertar" });
+            result.errors.push({ row: i + 2, reason: e?.message ?? "Error al insertar categoría" });
           }
         }
       } catch (e: any) {
@@ -336,25 +347,54 @@ export function registerBackupRoutes(app: Express): void {
       results.categories = result;
     }
 
+    // ── PRODUCTOS ─────────────────────────────────────────────────────────────
+    // Comportamiento UPSERT: busca por codigoBarras → sku → nombre normalizado.
+    // Si existe: actualiza campos sincronizables. Si no: crea.
+    // Nunca modifica: id, ownerId, tenantId, createdAt, initialStock.
     if (Array.isArray(prodRows) && prodRows.length > 0) {
-      const result: EntityResult = { imported: 0, skipped: 0, errors: [] };
+      const result: EntityResult = { imported: 0, updated: 0, skipped: 0, errors: [] };
       try {
-        const existingProds = await db.select({ sku: products.sku }).from(products).where(eq(products.tenantId, tenantId));
-        const existingSkus = new Set(existingProds.filter((p) => p.sku).map((p) => p.sku!.toLowerCase()));
+        const existingProds = await db
+          .select({ id: products.id, codigoBarras: products.codigoBarras, sku: products.sku, nombre: products.nombre })
+          .from(products)
+          .where(eq(products.tenantId, tenantId));
 
-        const allCats = await db.select({ id: categories.id, nombre: categories.nombre }).from(categories).where(eq(categories.tenantId, tenantId));
-        const catNameToId = new Map(allCats.map((c) => [c.nombre.toLowerCase().trim(), c.id]));
+        // Tres mapas de búsqueda en orden de prioridad.
+        const barcodeToId = new Map<string, string>();
+        const skuToId     = new Map<string, string>();
+        const nombreToId  = new Map<string, string>();
+        for (const p of existingProds) {
+          if (p.codigoBarras) barcodeToId.set(normalizeKey(p.codigoBarras), p.id);
+          if (p.sku)          skuToId.set(normalizeKey(p.sku), p.id);
+                              nombreToId.set(normalizeKey(p.nombre), p.id);
+        }
+
+        // Categorías disponibles para resolver nombre → id.
+        const allCats = await db
+          .select({ id: categories.id, nombre: categories.nombre })
+          .from(categories)
+          .where(eq(categories.tenantId, tenantId));
+        const catNameToId = new Map(allCats.map((c) => [normalizeKey(c.nombre), c.id]));
 
         for (let i = 0; i < prodRows.length; i++) {
           const row = prodRows[i] as any;
-          const sku = row.sku ? String(row.sku).trim() : null;
+          const nombre      = String(row.nombre ?? "").trim();
+          const sku         = row.sku          ? String(row.sku).trim()          || null : null;
+          const codigoBarras = row.codigoBarras ? String(row.codigoBarras).trim() || null : null;
 
-          if (sku && existingSkus.has(sku.toLowerCase())) { result.skipped++; continue; }
+          if (!nombre) { result.errors.push({ row: i + 2, reason: "Nombre vacío" }); continue; }
 
+          // Buscar producto existente: barcode → sku → nombre.
+          let existingId: string | undefined;
+          if (codigoBarras) existingId = barcodeToId.get(normalizeKey(codigoBarras));
+          if (!existingId && sku) existingId = skuToId.get(normalizeKey(sku));
+          if (!existingId) existingId = nombreToId.get(normalizeKey(nombre));
+
+          // Resolver categoría (auto-crear si no existe).
           let categoryId: string | null = null;
           if (row.categoria) {
             const catName = String(row.categoria).trim();
-            const catKey = catName.toLowerCase();
+            const catKey  = normalizeKey(catName);
             if (catNameToId.has(catKey)) {
               categoryId = catNameToId.get(catKey)!;
             } else {
@@ -363,30 +403,45 @@ export function registerBackupRoutes(app: Express): void {
                 categoryId = newCat.id;
                 catNameToId.set(catKey, newCat.id);
               } catch {
-                // If category creation fails, insert product without category
+                // Categoría no pudo crearse: el producto se importa sin categoría.
               }
             }
           }
 
+          const syncFields = {
+            categoryId,
+            descripcion:  row.descripcion  ? String(row.descripcion).trim()  || null : null,
+            precio:       String(row.precio  ?? "0"),
+            costo:        String(row.costo   ?? "0"),
+            stock:        Number(row.stock   ?? 0),
+            stockMinimo:  Number(row.stockMinimo ?? 0),
+            updatedAt:    new Date(),
+          };
+
           try {
-            await db.insert(products).values({
-              ownerId: userId,
-              tenantId,
-              categoryId,
-              nombre: String(row.nombre).trim(),
-              descripcion: row.descripcion ? String(row.descripcion).trim() || null : null,
-              sku,
-              codigoBarras: row.codigoBarras ? String(row.codigoBarras).trim() || null : null,
-              precio: String(row.precio ?? "0"),
-              costo: String(row.costo ?? "0"),
-              stock: Number(row.stock ?? 0),
-              stockMinimo: Number(row.stockMinimo ?? 0),
-              activo: row.activo !== false && row.activo !== "NO",
-            });
-            if (sku) existingSkus.add(sku.toLowerCase());
-            result.imported++;
+            if (existingId) {
+              // UPDATE — solo campos sincronizables. Nunca toca id, createdAt, initialStock.
+              await db.update(products).set(syncFields).where(eq(products.id, existingId));
+              result.updated++;
+            } else {
+              // INSERT — producto nuevo.
+              await db.insert(products).values({
+                ownerId: userId,
+                tenantId,
+                nombre,
+                sku,
+                codigoBarras,
+                activo: row.activo !== false && row.activo !== "NO",
+                ...syncFields,
+                updatedAt: undefined, // dejar que el default de DB lo maneje
+              });
+              if (codigoBarras) barcodeToId.set(normalizeKey(codigoBarras), nombre); // evitar duplicado en misma importación
+              if (sku)          skuToId.set(normalizeKey(sku), nombre);
+                                nombreToId.set(normalizeKey(nombre), nombre);
+              result.imported++;
+            }
           } catch (e: any) {
-            result.errors.push({ row: i + 2, reason: e?.message ?? "Error al insertar producto" });
+            result.errors.push({ row: i + 2, reason: e?.message ?? "Error al procesar producto" });
           }
         }
       } catch (e: any) {
@@ -395,26 +450,61 @@ export function registerBackupRoutes(app: Express): void {
       results.products = result;
     }
 
+    // ── CLIENTES ──────────────────────────────────────────────────────────────
+    // Comportamiento UPSERT: busca por email → nombre normalizado.
+    // Si existe: actualiza datos de contacto. NUNCA toca customerAccounts ni movimientos.
+    // Si no existe: crea.
     if (Array.isArray(custRows) && custRows.length > 0) {
-      const result: EntityResult = { imported: 0, skipped: 0, errors: [] };
+      const result: EntityResult = { imported: 0, updated: 0, skipped: 0, errors: [] };
       try {
+        const existingCusts = await db
+          .select({ id: customers.id, email: customers.email, nombre: customers.nombre })
+          .from(customers)
+          .where(eq(customers.tenantId, tenantId));
+
+        const emailToId  = new Map<string, string>();
+        const nombreToId = new Map<string, string>();
+        for (const c of existingCusts) {
+          if (c.email) emailToId.set(normalizeKey(c.email), c.id);
+                       nombreToId.set(normalizeKey(c.nombre), c.id);
+        }
+
         for (let i = 0; i < custRows.length; i++) {
-          const row = custRows[i] as any;
+          const row    = custRows[i] as any;
           const nombre = String(row.nombre ?? "").trim();
+          const email  = row.email ? String(row.email).trim() || null : null;
+
           if (!nombre) { result.errors.push({ row: i + 2, reason: "Nombre vacío" }); continue; }
+
+          // Buscar cliente existente: email → nombre.
+          let existingId: string | undefined;
+          if (email) existingId = emailToId.get(normalizeKey(email));
+          if (!existingId) existingId = nombreToId.get(normalizeKey(nombre));
+
+          // Campos de contacto sincronizables. Excluye todo lo financiero.
+          const contactFields = {
+            nombre,
+            telefono:      row.telefono      ? String(row.telefono).trim()      || null : null,
+            email,
+            direccion:     row.direccion     ? String(row.direccion).trim()     || null : null,
+            observaciones: row.observaciones ? String(row.observaciones).trim() || null : null,
+            updatedAt:     new Date(),
+          };
+
           try {
-            await db.insert(customers).values({
-              ownerId: userId,
-              tenantId,
-              nombre,
-              telefono: row.telefono ? String(row.telefono).trim() || null : null,
-              email: row.email ? String(row.email).trim() || null : null,
-              direccion: row.direccion ? String(row.direccion).trim() || null : null,
-              observaciones: row.observaciones ? String(row.observaciones).trim() || null : null,
-            });
-            result.imported++;
+            if (existingId) {
+              // UPDATE — solo contacto. customerAccounts y movimientos NO se tocan.
+              await db.update(customers).set(contactFields).where(eq(customers.id, existingId));
+              result.updated++;
+            } else {
+              // INSERT — cliente nuevo.
+              await db.insert(customers).values({ ownerId: userId, tenantId, ...contactFields, updatedAt: undefined });
+              if (email) emailToId.set(normalizeKey(email), nombre);
+                         nombreToId.set(normalizeKey(nombre), nombre);
+              result.imported++;
+            }
           } catch (e: any) {
-            result.errors.push({ row: i + 2, reason: e?.message ?? "Error al insertar cliente" });
+            result.errors.push({ row: i + 2, reason: e?.message ?? "Error al procesar cliente" });
           }
         }
       } catch (e: any) {
