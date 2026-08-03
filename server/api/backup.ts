@@ -410,12 +410,14 @@ export function registerBackupRoutes(app: Express): void {
 
           const syncFields = {
             categoryId,
-            descripcion:  row.descripcion  ? String(row.descripcion).trim()  || null : null,
-            precio:       String(row.precio  ?? "0"),
-            costo:        String(row.costo   ?? "0"),
-            stock:        Number(row.stock   ?? 0),
-            stockMinimo:  Number(row.stockMinimo ?? 0),
-            updatedAt:    new Date(),
+            descripcion:   row.descripcion  ? String(row.descripcion).trim()  || null : null,
+            codigoBarras:  codigoBarras,
+            sku:           sku,
+            precio:        String(row.precio  ?? "0"),
+            costo:         String(row.costo   ?? "0"),
+            stock:         Number(row.stock   ?? 0),
+            stockMinimo:   Number(row.stockMinimo ?? 0),
+            updatedAt:     new Date(),
           };
 
           try {
@@ -429,8 +431,6 @@ export function registerBackupRoutes(app: Express): void {
                 ownerId: userId,
                 tenantId,
                 nombre,
-                sku,
-                codigoBarras,
                 activo: row.activo !== false && row.activo !== "NO",
                 ...syncFields,
                 updatedAt: undefined, // dejar que el default de DB lo maneje
