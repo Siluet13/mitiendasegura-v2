@@ -14,7 +14,7 @@ import { ImportWizard } from "@/components/backup/ImportWizard";
 import { toast } from "sonner";
 import {
   AlertCircle, AlertTriangle, Clock, Download, FileSpreadsheet,
-  FileArchive, FileJson, RotateCcw, Upload, TableProperties,
+  FileArchive, FileJson, RotateCcw, Upload, TableProperties, RefreshCw,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -216,6 +216,22 @@ function BackupPage() {
           </div>
           <Separator />
           <ImportWizard />
+        </CardContent>
+      </Card>
+
+      {/* SINCRONIZACIÓN */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <RefreshCw className="h-4 w-4" /> Sincronizar backup
+          </CardTitle>
+          <CardDescription>
+            Importá desde un backup sin borrar nada. Crea lo que falta, actualiza lo que cambió,
+            deja intacto lo que está igual. No modifica ventas, caja ni cuenta corriente.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ImportWizard mode="sync" />
         </CardContent>
       </Card>
 

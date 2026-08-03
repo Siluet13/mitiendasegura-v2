@@ -768,4 +768,258 @@ export function registerBackupRoutes(app: Express): void {
       res.status(500).json({ message: err?.message ?? "Error al restaurar el backup" });
     }
   });
+
+  // ── SYNC ──────────────────────────────────────────────────────────────────
+  // Modo no-destructivo: crea datos faltantes, actualiza los que cambiaron,
+  // deja intactos los que no cambiaron. Nunca borra ni toca ventas/caja/CC.
+  // Acepta el mismo payload que /import: { categories, products, customers }
+  // (el parsing de JSON/XLSX/CSV ocurre en el frontend vía fileParser.ts).
+  // ownerId y tenantId siempre provienen del usuario autenticado.
+  app.post("/api/backup/sync", isAuthenticated, async (req, res) => {
+    const { userId, tenantId } = requireTenant(req);
+    if (!tenantId) return noTenant(res);
+
+    const { categories: catRows, products: prodRows, customers: custRows } = req.body ?? {};
+
+    interface SyncEntityResult {
+      creados: number;
+      actualizados: number;
+      sinCambios: number;
+      errores: { row: number; reason: string }[];
+    }
+    const results: Record<string, SyncEntityResult> = {};
+
+    try {
+      await db.transaction(async (tx) => {
+
+        // ── CATEGORÍAS ──────────────────────────────────────────────────────
+        // Busca por nombre normalizado. Si existe → sinCambios. Si no → crea.
+        if (Array.isArray(catRows) && catRows.length > 0) {
+          const result: SyncEntityResult = { creados: 0, actualizados: 0, sinCambios: 0, errores: [] };
+          const existingCats = await tx
+            .select({ id: categories.id, nombre: categories.nombre })
+            .from(categories)
+            .where(eq(categories.tenantId, tenantId));
+          const nameToId = new Map(existingCats.map((c) => [normalizeKey(c.nombre), c.id]));
+
+          for (let i = 0; i < catRows.length; i++) {
+            const row = catRows[i] as { nombre?: string };
+            const nombre = String(row.nombre ?? "").trim();
+            if (!nombre) { result.errores.push({ row: i + 2, reason: "Nombre vacío" }); continue; }
+
+            if (nameToId.has(normalizeKey(nombre))) {
+              result.sinCambios++;
+            } else {
+              try {
+                const [newCat] = await tx
+                  .insert(categories)
+                  .values({ ownerId: userId, tenantId, nombre })
+                  .returning({ id: categories.id });
+                nameToId.set(normalizeKey(nombre), newCat.id);
+                result.creados++;
+              } catch (e: any) {
+                result.errores.push({ row: i + 2, reason: e?.message ?? "Error al insertar categoría" });
+              }
+            }
+          }
+          results.categories = result;
+        }
+
+        // ── PRODUCTOS ───────────────────────────────────────────────────────
+        // Busca: codigoBarras → sku → nombre normalizado.
+        // Si existe y cambió → UPDATE syncFields. Si no cambió → sinCambios.
+        // Si no existe → INSERT. Nunca toca id, createdAt, initialStock.
+        if (Array.isArray(prodRows) && prodRows.length > 0) {
+          const result: SyncEntityResult = { creados: 0, actualizados: 0, sinCambios: 0, errores: [] };
+
+          const existingProds = await tx
+            .select()
+            .from(products)
+            .where(eq(products.tenantId, tenantId));
+
+          const barcodeToId = new Map<string, string>();
+          const skuToId     = new Map<string, string>();
+          const nombreToId  = new Map<string, string>();
+          const prodById    = new Map<string, typeof existingProds[0]>();
+          for (const p of existingProds) {
+            if (p.codigoBarras) barcodeToId.set(normalizeKey(p.codigoBarras), p.id);
+            if (p.sku)          skuToId.set(normalizeKey(p.sku), p.id);
+                                nombreToId.set(normalizeKey(p.nombre), p.id);
+                                prodById.set(p.id, p);
+          }
+
+          const allCats = await tx
+            .select({ id: categories.id, nombre: categories.nombre })
+            .from(categories)
+            .where(eq(categories.tenantId, tenantId));
+          const catNameToId = new Map(allCats.map((c) => [normalizeKey(c.nombre), c.id]));
+
+          for (let i = 0; i < prodRows.length; i++) {
+            const row          = prodRows[i] as any;
+            const nombre       = String(row.nombre ?? "").trim();
+            const sku          = row.sku          ? String(row.sku).trim()          || null : null;
+            const codigoBarras = row.codigoBarras ? String(row.codigoBarras).trim() || null : null;
+
+            if (!nombre) { result.errores.push({ row: i + 2, reason: "Nombre vacío" }); continue; }
+
+            let existingId: string | undefined;
+            if (codigoBarras) existingId = barcodeToId.get(normalizeKey(codigoBarras));
+            if (!existingId && sku) existingId = skuToId.get(normalizeKey(sku));
+            if (!existingId) existingId = nombreToId.get(normalizeKey(nombre));
+
+            // Resolver categoría. Si no existe en DB → crearla on-the-fly.
+            let categoryId: string | null = null;
+            if (row.categoria) {
+              const catName = String(row.categoria).trim();
+              const catKey  = normalizeKey(catName);
+              if (catNameToId.has(catKey)) {
+                categoryId = catNameToId.get(catKey)!;
+              } else {
+                try {
+                  const [newCat] = await tx
+                    .insert(categories)
+                    .values({ ownerId: userId, tenantId, nombre: catName })
+                    .returning({ id: categories.id });
+                  categoryId = newCat.id;
+                  catNameToId.set(catKey, newCat.id);
+                } catch {
+                  // Producto se sincroniza sin categoría si no puede crearse.
+                }
+              }
+            }
+
+            const syncFields = {
+              categoryId,
+              descripcion:   row.descripcion  ? String(row.descripcion).trim()  || null : null,
+              codigoBarras,
+              sku,
+              precio:        String(row.precio  ?? "0"),
+              costo:         String(row.costo   ?? "0"),
+              stock:         Number(row.stock   ?? 0),
+              stockMinimo:   Number(row.stockMinimo ?? 0),
+            };
+
+            try {
+              if (existingId) {
+                const ex = prodById.get(existingId)!;
+                const changed =
+                  (ex.categoryId   ?? null) !== syncFields.categoryId   ||
+                  (ex.descripcion  ?? null) !== syncFields.descripcion  ||
+                  (ex.codigoBarras ?? null) !== syncFields.codigoBarras ||
+                  (ex.sku          ?? null) !== syncFields.sku          ||
+                  String(ex.precio)         !== syncFields.precio       ||
+                  String(ex.costo)          !== syncFields.costo        ||
+                  ex.stock                  !== syncFields.stock        ||
+                  ex.stockMinimo            !== syncFields.stockMinimo;
+
+                if (changed) {
+                  await tx
+                    .update(products)
+                    .set({ ...syncFields, updatedAt: new Date() })
+                    .where(eq(products.id, existingId));
+                  result.actualizados++;
+                } else {
+                  result.sinCambios++;
+                }
+              } else {
+                await tx.insert(products).values({
+                  ownerId: userId,
+                  tenantId,
+                  nombre,
+                  activo: row.activo !== false && row.activo !== "NO",
+                  ...syncFields,
+                });
+                if (codigoBarras) barcodeToId.set(normalizeKey(codigoBarras), nombre);
+                if (sku)          skuToId.set(normalizeKey(sku), nombre);
+                                  nombreToId.set(normalizeKey(nombre), nombre);
+                result.creados++;
+              }
+            } catch (e: any) {
+              result.errores.push({ row: i + 2, reason: e?.message ?? "Error al procesar producto" });
+            }
+          }
+          results.products = result;
+        }
+
+        // ── CLIENTES ────────────────────────────────────────────────────────
+        // Busca: email → nombre normalizado.
+        // Si existe y cambió → UPDATE contactFields. Si no cambió → sinCambios.
+        // NUNCA toca customerAccounts ni customerAccountMovements.
+        if (Array.isArray(custRows) && custRows.length > 0) {
+          const result: SyncEntityResult = { creados: 0, actualizados: 0, sinCambios: 0, errores: [] };
+
+          const existingCusts = await tx
+            .select()
+            .from(customers)
+            .where(eq(customers.tenantId, tenantId));
+
+          const emailToId  = new Map<string, string>();
+          const nombreToId = new Map<string, string>();
+          const custById   = new Map<string, typeof existingCusts[0]>();
+          for (const c of existingCusts) {
+            if (c.email) emailToId.set(normalizeKey(c.email), c.id);
+                         nombreToId.set(normalizeKey(c.nombre), c.id);
+                         custById.set(c.id, c);
+          }
+
+          for (let i = 0; i < custRows.length; i++) {
+            const row    = custRows[i] as any;
+            const nombre = String(row.nombre ?? "").trim();
+            const email  = row.email ? String(row.email).trim() || null : null;
+
+            if (!nombre) { result.errores.push({ row: i + 2, reason: "Nombre vacío" }); continue; }
+
+            let existingId: string | undefined;
+            if (email) existingId = emailToId.get(normalizeKey(email));
+            if (!existingId) existingId = nombreToId.get(normalizeKey(nombre));
+
+            const contactFields = {
+              nombre,
+              telefono:      row.telefono      ? String(row.telefono).trim()      || null : null,
+              email,
+              direccion:     row.direccion     ? String(row.direccion).trim()     || null : null,
+              observaciones: row.observaciones ? String(row.observaciones).trim() || null : null,
+            };
+
+            try {
+              if (existingId) {
+                const ex = custById.get(existingId)!;
+                const changed =
+                  ex.nombre                    !== contactFields.nombre        ||
+                  (ex.telefono      ?? null)   !== contactFields.telefono      ||
+                  (ex.email         ?? null)   !== contactFields.email         ||
+                  (ex.direccion     ?? null)   !== contactFields.direccion     ||
+                  (ex.observaciones ?? null)   !== contactFields.observaciones;
+
+                if (changed) {
+                  await tx
+                    .update(customers)
+                    .set({ ...contactFields, updatedAt: new Date() })
+                    .where(eq(customers.id, existingId));
+                  result.actualizados++;
+                } else {
+                  result.sinCambios++;
+                }
+              } else {
+                await tx.insert(customers).values({ ownerId: userId, tenantId, ...contactFields });
+                if (email) emailToId.set(normalizeKey(email), nombre);
+                           nombreToId.set(normalizeKey(nombre), nombre);
+                result.creados++;
+              }
+            } catch (e: any) {
+              result.errores.push({ row: i + 2, reason: e?.message ?? "Error al procesar cliente" });
+            }
+          }
+          results.customers = result;
+        }
+
+      }); // fin transaction
+
+      logEvent({ module: "backup", event: "BACKUP_SYNCED", message: "Sincronización de backup realizada", userId, ownerId: userId, tenantId, details: { entities: Object.keys(results) } });
+      res.json({ results });
+    } catch (err: any) {
+      console.error("Sync error:", err);
+      res.status(500).json({ message: err?.message ?? "Error al sincronizar el backup" });
+    }
+  });
 }

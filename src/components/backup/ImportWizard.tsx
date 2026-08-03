@@ -10,8 +10,8 @@ import {
   validateProducts, validateCategories, validateCustomers,
 } from "@/lib/backup/validator";
 import type { ValidProduct, ValidCategory, ValidCustomer, ValidationError } from "@/lib/backup/validator";
-import { importData } from "@/lib/api/backup";
-import type { EntityImportResult } from "@/lib/api/backup";
+import { importData, syncData } from "@/lib/api/backup";
+import type { EntityImportResult, SyncEntityResult } from "@/lib/api/backup";
 import type { ParsedSheet } from "@/lib/backup/fileParser";
 import type { EntityType, EntityField } from "@shared/importMapper";
 import { toast } from "sonner";
@@ -27,7 +27,8 @@ type WizardStep = "idle" | "configuring" | "importing" | "done";
 
 interface DoneState {
   step: "done";
-  results: Record<string, EntityImportResult>;
+  results: Record<string, EntityImportResult | SyncEntityResult>;
+  mode: "import" | "sync";
 }
 
 type WizardState =
@@ -191,7 +192,7 @@ function SheetCard({
   );
 }
 
-function ResultsView({ results }: { results: Record<string, EntityImportResult> }) {
+function ImportResultsView({ results }: { results: Record<string, EntityImportResult> }) {
   const entries = Object.entries(results) as [EntityType, EntityImportResult][];
   return (
     <div className="space-y-3">
@@ -204,6 +205,7 @@ function ResultsView({ results }: { results: Record<string, EntityImportResult> 
           <p className="font-medium text-sm">{ENTITY_LABELS[entity] ?? entity}</p>
           <div className="flex gap-4 text-sm">
             {r.imported > 0 && <span className="text-green-600">✔ {r.imported} importados</span>}
+            {r.updated > 0 && <span className="text-blue-600">↑ {r.updated} actualizados</span>}
             {r.skipped > 0 && <span className="text-yellow-600">⚠ {r.skipped} omitidos</span>}
             {r.errors.length > 0 && <span className="text-red-600">✗ {r.errors.length} errores</span>}
           </div>
@@ -221,10 +223,50 @@ function ResultsView({ results }: { results: Record<string, EntityImportResult> 
   );
 }
 
-export function ImportWizard() {
+function SyncResultsView({ results }: { results: Record<string, SyncEntityResult> }) {
+  const entries = Object.entries(results) as [EntityType, SyncEntityResult][];
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <CheckCircle2 className="h-5 w-5 text-green-600" />
+        <span className="font-medium">Sincronización completada</span>
+      </div>
+      {entries.map(([entity, r]) => (
+        <div key={entity} className="border rounded-lg p-3 space-y-1">
+          <p className="font-medium text-sm">{ENTITY_LABELS[entity] ?? entity}</p>
+          <div className="flex flex-wrap gap-4 text-sm">
+            {r.creados > 0 && <span className="text-green-600">✔ {r.creados} creados</span>}
+            {r.actualizados > 0 && <span className="text-blue-600">↑ {r.actualizados} actualizados</span>}
+            {r.sinCambios > 0 && <span className="text-muted-foreground">— {r.sinCambios} sin cambios</span>}
+            {r.errores.length > 0 && <span className="text-red-600">✗ {r.errores.length} errores</span>}
+          </div>
+          {r.errores.length > 0 && (
+            <div className="text-xs space-y-0.5 pt-1">
+              {r.errores.slice(0, 5).map((e, i) => (
+                <p key={i} className="text-red-500">Fila {e.row}: {e.reason}</p>
+              ))}
+              {r.errores.length > 5 && <p className="text-muted-foreground">... y {r.errores.length - 5} más</p>}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+interface ImportWizardProps {
+  /** "import" (default): agrega datos, usa /api/backup/import.
+   *  "sync": sincroniza sin destruir, usa /api/backup/sync, reporta creados/actualizados/sinCambios. */
+  mode?: "import" | "sync";
+}
+
+export function ImportWizard({ mode = "import" }: ImportWizardProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<WizardState>({ step: "idle" });
   const [parsing, setParsing] = useState(false);
+
+  const isSync = mode === "sync";
+  const actionLabel = isSync ? "Sincronizar" : "Importar";
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -266,7 +308,7 @@ export function ImportWizard() {
 
     const totalValid = byEntity.products.length + byEntity.categories.length + byEntity.customers.length;
     if (totalValid === 0) {
-      toast.error("No hay registros válidos para importar");
+      toast.error(`No hay registros válidos para ${actionLabel.toLowerCase()}`);
       return;
     }
 
@@ -277,11 +319,17 @@ export function ImportWizard() {
       if (byEntity.products.length > 0) payload.products = byEntity.products;
       if (byEntity.customers.length > 0) payload.customers = byEntity.customers;
 
-      const { results } = await importData(payload as any);
-      setState({ step: "done", results: results as any });
-      toast.success("Importación completada");
+      if (isSync) {
+        const { results } = await syncData(payload as any);
+        setState({ step: "done", results: results as any, mode: "sync" });
+        toast.success("Sincronización completada");
+      } else {
+        const { results } = await importData(payload as any);
+        setState({ step: "done", results: results as any, mode: "import" });
+        toast.success("Importación completada");
+      }
     } catch (err: any) {
-      toast.error(err.message ?? "Error al importar");
+      toast.error(err.message ?? `Error al ${actionLabel.toLowerCase()}`);
       setState({ step: "idle" });
     }
   }
@@ -294,7 +342,7 @@ export function ImportWizard() {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
         <Loader2 className="h-4 w-4 animate-spin" />
-        Importando datos...
+        {actionLabel}ando datos...
       </div>
     );
   }
@@ -302,8 +350,13 @@ export function ImportWizard() {
   if (state.step === "done") {
     return (
       <div className="space-y-4">
-        <ResultsView results={state.results} />
-        <Button variant="outline" size="sm" onClick={reset}>Importar otro archivo</Button>
+        {state.mode === "sync"
+          ? <SyncResultsView results={state.results as Record<string, SyncEntityResult>} />
+          : <ImportResultsView results={state.results as Record<string, EntityImportResult>} />
+        }
+        <Button variant="outline" size="sm" onClick={reset}>
+          {actionLabel} otro archivo
+        </Button>
       </div>
     );
   }
@@ -313,7 +366,7 @@ export function ImportWizard() {
     const totalValid = allValidations.reduce((acc, v) => acc + v.validCount, 0);
     const totalErrors = allValidations.reduce((acc, v) => acc + v.errors.length, 0);
 
-    const importLabel = state.sheets
+    const recordLabel = state.sheets
       .map((ss) => {
         const v = getValidation(ss);
         if (v.validCount === 0) return null;
@@ -340,7 +393,7 @@ export function ImportWizard() {
           <Alert>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription className="text-sm">
-              {totalErrors} {totalErrors === 1 ? "registro tiene error" : "registros tienen errores"} y no serán importados.
+              {totalErrors} {totalErrors === 1 ? "registro tiene error" : "registros tienen errores"} y no serán procesados.
             </AlertDescription>
           </Alert>
         )}
@@ -350,7 +403,7 @@ export function ImportWizard() {
           disabled={totalValid === 0}
           className="w-full"
         >
-          {totalValid > 0 ? `Importar ${importLabel}` : "Sin registros válidos"}
+          {totalValid > 0 ? `${actionLabel} ${recordLabel}` : "Sin registros válidos"}
         </Button>
       </div>
     );
@@ -378,7 +431,10 @@ export function ImportWizard() {
         )}
       </Button>
       <p className="text-xs text-muted-foreground">
-        Soporta archivos JSON de backup, Excel (.xlsx) y CSV. Los datos se agregan sin reemplazar los existentes.
+        {isSync
+          ? "Soporta JSON de backup, Excel (.xlsx) y CSV. Crea datos faltantes, actualiza los que cambiaron, conserva el resto."
+          : "Soporta archivos JSON de backup, Excel (.xlsx) y CSV. Los datos se agregan sin reemplazar los existentes."
+        }
       </p>
     </div>
   );

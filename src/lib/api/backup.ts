@@ -122,6 +122,30 @@ export async function importData(payload: {
   });
 }
 
+export interface SyncEntityResult {
+  creados: number;
+  actualizados: number;
+  sinCambios: number;
+  errores: { row: number; reason: string }[];
+}
+
+export interface SyncResult {
+  categories?: SyncEntityResult;
+  products?: SyncEntityResult;
+  customers?: SyncEntityResult;
+}
+
+export async function syncData(payload: {
+  categories?: unknown[];
+  products?: unknown[];
+  customers?: unknown[];
+}): Promise<{ results: SyncResult }> {
+  return apiFetch("/api/backup/sync", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function restoreBackup(payload: BackupPayload): Promise<{ ok: boolean; stats: BackupStats }> {
   return apiFetch("/api/backup/restore", {
     method: "POST",
