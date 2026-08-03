@@ -42,6 +42,7 @@ import {
 import { LastScannedPanel } from "@/components/sales/LastScannedPanel";
 import { ReceiptDialog } from "@/components/receipts/ReceiptDialog";
 import { getCashSession, openCash, closeCash, type CashSession } from "@/lib/api/cash";
+import { exportBackup } from "@/lib/api/backup";
 
 export const Route = createFileRoute("/_authenticated/sales")({
   head: () => ({ meta: [{ title: "Ventas" }] }),
@@ -94,6 +95,10 @@ function CashRegisterBar({
       qc.invalidateQueries({ queryKey: ["cash_session"] });
       setCloseModal(false);
       toast.success(`Caja cerrada — Total cobrado: ${fmt(data.current_total)}`);
+      // Backup automático fire-and-forget — no bloquea ni retrasa el cierre
+      exportBackup().catch(() => {
+        toast.warning("No se pudo generar el backup automático. Podés descargarlo manualmente desde Backup.");
+      });
     },
     onError: (e: Error) => toast.error(e.message),
   });
