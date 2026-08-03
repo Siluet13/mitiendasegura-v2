@@ -11,7 +11,6 @@ import {
   saleItems,
   stockMovements,
   businessSettings,
-  licenses,
 } from "@shared/schema";
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
@@ -47,13 +46,12 @@ function toCsvString(headers: string[], rows: Record<string, unknown>[]): string
 }
 
 async function fetchAllData(userId: string, tenantId: string) {
-  const [bsData, catsData, prodsData, custsData, salesData, licData] = await Promise.all([
+  const [bsData, catsData, prodsData, custsData, salesData] = await Promise.all([
     db.select().from(businessSettings).where(eq(businessSettings.ownerId, userId)),
     db.select().from(categories).where(eq(categories.tenantId, tenantId)),
     db.select().from(products).where(eq(products.tenantId, tenantId)),
     db.select().from(customers).where(eq(customers.tenantId, tenantId)),
     db.select().from(sales).where(eq(sales.tenantId, tenantId)),
-    db.select().from(licenses).where(eq(licenses.ownerId, userId)),
   ]);
   const saleIds = salesData.map((s) => s.id);
   const [saleItemsData, stockData] = await Promise.all([
@@ -62,7 +60,7 @@ async function fetchAllData(userId: string, tenantId: string) {
       : Promise.resolve([]),
     db.select().from(stockMovements).where(eq(stockMovements.tenantId, tenantId)),
   ]);
-  return { bsData, catsData, prodsData, custsData, salesData, saleItemsData, stockData, licData };
+  return { bsData, catsData, prodsData, custsData, salesData, saleItemsData, stockData };
 }
 
 export function registerBackupRoutes(app: Express): void {
@@ -70,7 +68,7 @@ export function registerBackupRoutes(app: Express): void {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
 
-    const { bsData, catsData, prodsData, custsData, salesData, saleItemsData, stockData, licData } =
+    const { bsData, catsData, prodsData, custsData, salesData, saleItemsData, stockData } =
       await fetchAllData(userId, tenantId);
 
     const payload = {
@@ -87,7 +85,6 @@ export function registerBackupRoutes(app: Express): void {
         sales: salesData,
         saleItems: saleItemsData,
         stockMovements: stockData,
-        license: licData[0] ?? null,
       },
       stats: {
         categories: catsData.length,
@@ -506,6 +503,17 @@ export function registerBackupRoutes(app: Express): void {
         await tx.delete(products).where(eq(products.tenantId, tenantId));
         await tx.delete(customers).where(eq(customers.tenantId, tenantId));
         await tx.delete(categories).where(eq(categories.tenantId, tenantId));
+        // Leer campos de billing ANTES de borrar para preservarlos tras el restore.
+        const [existingBs] = await tx
+          .select({
+            subscriptionStatus: businessSettings.subscriptionStatus,
+            billingCycleStart: businessSettings.billingCycleStart,
+            billingCycleEnd: businessSettings.billingCycleEnd,
+            lastPaymentDate: businessSettings.lastPaymentDate,
+          })
+          .from(businessSettings)
+          .where(eq(businessSettings.ownerId, userId));
+
         await tx.delete(businessSettings).where(eq(businessSettings.ownerId, userId));
 
         if (data.businessSettings) {
@@ -513,11 +521,14 @@ export function registerBackupRoutes(app: Express): void {
           await tx.insert(businessSettings).values({
             ...bs,
             ownerId: userId,
-            billingCycleStart: toDateRequired(bs.billingCycleStart),
-            billingCycleEnd: toDateRequired(bs.billingCycleEnd),
-            lastPaymentDate: toDate(bs.lastPaymentDate),
+            // Siempre sobreescribir con los valores actuales del sistema SaaS,
+            // ignorando cualquier valor que venga del backup.
+            subscriptionStatus: existingBs?.subscriptionStatus ?? "active",
+            billingCycleStart: existingBs?.billingCycleStart ?? new Date(),
+            billingCycleEnd: existingBs?.billingCycleEnd ?? new Date(),
+            lastPaymentDate: existingBs?.lastPaymentDate ?? null,
             createdAt: toDateRequired(bs.createdAt),
-            updatedAt: toDateRequired(bs.updatedAt),
+            updatedAt: new Date(),
           });
         }
 
@@ -577,31 +588,7 @@ export function registerBackupRoutes(app: Express): void {
           );
         }
 
-        if (data.license) {
-          const lic = data.license as any;
-          await tx
-            .insert(licenses)
-            .values({
-              id: lic.id,
-              ownerId: userId,
-              status: lic.status ?? "pendiente",
-              activatedAt: toDate(lic.activatedAt),
-              expiresAt: toDate(lic.expiresAt),
-              suspendedAt: toDate(lic.suspendedAt),
-              notes: lic.notes ?? null,
-            })
-            .onConflictDoUpdate({
-              target: licenses.ownerId,
-              set: {
-                status: lic.status ?? "pendiente",
-                activatedAt: toDate(lic.activatedAt),
-                expiresAt: toDate(lic.expiresAt),
-                suspendedAt: toDate(lic.suspendedAt),
-                notes: lic.notes ?? null,
-                updatedAt: new Date(),
-              },
-            });
-        }
+        // Las licencias son datos del sistema SaaS y NUNCA se restauran desde un backup.
       });
 
       logEvent({ module: "backup", event: "BACKUP_RESTORED", message: "Backup restaurado completamente", userId, ownerId: userId, tenantId, details: body.stats ?? null });
