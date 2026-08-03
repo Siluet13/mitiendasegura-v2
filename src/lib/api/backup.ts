@@ -26,6 +26,8 @@ export interface BackupStats {
   categories: number;
   products: number;
   customers: number;
+  customerAccounts: number;
+  customerAccountMovements: number;
   sales: number;
   saleItems: number;
   stockMovements: number;
@@ -42,6 +44,10 @@ export interface BackupPayload {
     categories: unknown[];
     products: unknown[];
     customers: unknown[];
+    /** Saldos de cuenta corriente por cliente. Presente en backups v1.0+. */
+    customerAccounts?: unknown[];
+    /** Historial de movimientos de cuenta corriente. Presente en backups v1.0+. */
+    customerAccountMovements?: unknown[];
     sales: unknown[];
     saleItems: unknown[];
     stockMovements: unknown[];
@@ -158,6 +164,10 @@ export function parseBackupFile(file: File): Promise<BackupPayload> {
           return;
         }
 
+        // Compatibilidad con backups anteriores: estas tablas pueden no estar presentes.
+        if (!Array.isArray(d.customerAccounts))         d.customerAccounts = [];
+        if (!Array.isArray(d.customerAccountMovements)) d.customerAccountMovements = [];
+
         if (json.exportedAt && isNaN(Date.parse(json.exportedAt))) {
           reject(new Error("El backup tiene una fecha de exportación inválida"));
           return;
@@ -165,6 +175,7 @@ export function parseBackupFile(file: File): Promise<BackupPayload> {
 
         const totalItems =
           d.categories.length + d.products.length + d.customers.length +
+          d.customerAccounts.length + d.customerAccountMovements.length +
           d.sales.length + d.saleItems.length + d.stockMovements.length;
         if (totalItems === 0 && !d.businessSettings) {
           reject(new Error("El backup está vacío y no contiene datos para restaurar"));

@@ -12,6 +12,8 @@ import {
   categories,
   products,
   customers,
+  customerAccounts,
+  customerAccountMovements,
   sales,
   saleItems,
   stockMovements,
@@ -51,12 +53,14 @@ function toCsvString(headers: string[], rows: Record<string, unknown>[]): string
 }
 
 async function fetchAllData(userId: string, tenantId: string) {
-  const [bsData, catsData, prodsData, custsData, salesData] = await Promise.all([
+  const [bsData, catsData, prodsData, custsData, salesData, caData, camData] = await Promise.all([
     db.select().from(businessSettings).where(eq(businessSettings.ownerId, userId)),
     db.select().from(categories).where(eq(categories.tenantId, tenantId)),
     db.select().from(products).where(eq(products.tenantId, tenantId)),
     db.select().from(customers).where(eq(customers.tenantId, tenantId)),
     db.select().from(sales).where(eq(sales.tenantId, tenantId)),
+    db.select().from(customerAccounts).where(eq(customerAccounts.tenantId, tenantId)),
+    db.select().from(customerAccountMovements).where(eq(customerAccountMovements.tenantId, tenantId)),
   ]);
   const saleIds = salesData.map((s) => s.id);
   const [saleItemsData, stockData] = await Promise.all([
@@ -65,7 +69,7 @@ async function fetchAllData(userId: string, tenantId: string) {
       : Promise.resolve([]),
     db.select().from(stockMovements).where(eq(stockMovements.tenantId, tenantId)),
   ]);
-  return { bsData, catsData, prodsData, custsData, salesData, saleItemsData, stockData };
+  return { bsData, catsData, prodsData, custsData, salesData, saleItemsData, stockData, caData, camData };
 }
 
 export function registerBackupRoutes(app: Express): void {
@@ -73,7 +77,7 @@ export function registerBackupRoutes(app: Express): void {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
 
-    const { bsData, catsData, prodsData, custsData, salesData, saleItemsData, stockData } =
+    const { bsData, catsData, prodsData, custsData, salesData, saleItemsData, stockData, caData, camData } =
       await fetchAllData(userId, tenantId);
 
     const payload = {
@@ -87,6 +91,8 @@ export function registerBackupRoutes(app: Express): void {
         categories: catsData,
         products: prodsData,
         customers: custsData,
+        customerAccounts: caData,
+        customerAccountMovements: camData,
         sales: salesData,
         saleItems: saleItemsData,
         stockMovements: stockData,
@@ -95,6 +101,8 @@ export function registerBackupRoutes(app: Express): void {
         categories: catsData.length,
         products: prodsData.length,
         customers: custsData.length,
+        customerAccounts: caData.length,
+        customerAccountMovements: camData.length,
         sales: salesData.length,
         saleItems: saleItemsData.length,
         stockMovements: stockData.length,
@@ -547,10 +555,16 @@ export function registerBackupRoutes(app: Express): void {
       return res.status(400).json({ message: "Estructura de datos inválida" });
     }
 
+    // Compatibilidad con backups anteriores: estas tablas pueden no estar presentes.
+    if (!Array.isArray(data.customerAccounts))         data.customerAccounts = [];
+    if (!Array.isArray(data.customerAccountMovements)) data.customerAccountMovements = [];
+
     const totalRows =
       data.categories.length +
       data.products.length +
       data.customers.length +
+      data.customerAccounts.length +
+      data.customerAccountMovements.length +
       data.sales.length +
       data.saleItems.length +
       data.stockMovements.length;
@@ -563,6 +577,45 @@ export function registerBackupRoutes(app: Express): void {
       return res.status(400).json({
         message: `El backup supera el límite de ${MAX_RESTORE_ROWS.toLocaleString("es-AR")} registros (${totalRows.toLocaleString("es-AR")} encontrados). Contactá soporte.`,
       });
+    }
+
+    // ── Validación de integridad referencial ─────────────────────────────────
+    // Se ejecuta ANTES de la transacción para evitar errores SQL poco descriptivos.
+    {
+      const productIds  = new Set<string>((data.products  as any[]).map((p: any) => p.id).filter(Boolean));
+      const customerIds = new Set<string>((data.customers as any[]).map((c: any) => c.id).filter(Boolean));
+
+      // saleItems → products
+      const orphanSaleItems = (data.saleItems as any[]).filter((si: any) => si.productId && !productIds.has(si.productId));
+      if (orphanSaleItems.length > 0) {
+        return res.status(400).json({
+          message: `El backup contiene ${orphanSaleItems.length} ítem(s) de venta que referencian productos inexistentes. El backup puede estar dañado.`,
+        });
+      }
+
+      // stockMovements → products
+      const orphanStock = (data.stockMovements as any[]).filter((m: any) => m.productId && !productIds.has(m.productId));
+      if (orphanStock.length > 0) {
+        return res.status(400).json({
+          message: `El backup contiene ${orphanStock.length} movimiento(s) de stock que referencian productos inexistentes. El backup puede estar dañado.`,
+        });
+      }
+
+      // customerAccounts → customers
+      const orphanAccounts = (data.customerAccounts as any[]).filter((ca: any) => ca.customerId && !customerIds.has(ca.customerId));
+      if (orphanAccounts.length > 0) {
+        return res.status(400).json({
+          message: `El backup contiene ${orphanAccounts.length} cuenta(s) corriente que referencian clientes inexistentes. El backup puede estar dañado.`,
+        });
+      }
+
+      // customerAccountMovements → customers
+      const orphanMovements = (data.customerAccountMovements as any[]).filter((m: any) => m.customerId && !customerIds.has(m.customerId));
+      if (orphanMovements.length > 0) {
+        return res.status(400).json({
+          message: `El backup contiene ${orphanMovements.length} movimiento(s) de cuenta corriente que referencian clientes inexistentes. El backup puede estar dañado.`,
+        });
+      }
     }
 
     function toDate(v: unknown): Date | null {
@@ -578,6 +631,7 @@ export function registerBackupRoutes(app: Express): void {
 
     try {
       await db.transaction(async (tx) => {
+        // Eliminar en orden seguro respetando dependencias FK.
         await tx.delete(stockMovements).where(eq(stockMovements.tenantId, tenantId));
 
         const existingSales = await tx
@@ -591,6 +645,10 @@ export function registerBackupRoutes(app: Express): void {
         }
         await tx.delete(sales).where(eq(sales.tenantId, tenantId));
         await tx.delete(products).where(eq(products.tenantId, tenantId));
+        // Eliminar cuenta corriente explícitamente antes de clientes
+        // (la CASCADE de FK también lo haría, pero lo hacemos explícito).
+        await tx.delete(customerAccountMovements).where(eq(customerAccountMovements.tenantId, tenantId));
+        await tx.delete(customerAccounts).where(eq(customerAccounts.tenantId, tenantId));
         await tx.delete(customers).where(eq(customers.tenantId, tenantId));
         await tx.delete(categories).where(eq(categories.tenantId, tenantId));
         // Leer campos de billing ANTES de borrar para preservarlos tras el restore.
@@ -648,6 +706,28 @@ export function registerBackupRoutes(app: Express): void {
               ...c, ownerId: userId, tenantId,
               createdAt: toDateRequired(c.createdAt),
               updatedAt: toDateRequired(c.updatedAt),
+            }))
+          );
+        }
+
+        // Restaurar cuentas corrientes DESPUÉS de clientes (FK: customerId → customers.id).
+        // customerAccounts no tiene ownerId ni createdAt en el schema.
+        if (data.customerAccounts.length > 0) {
+          await tx.insert(customerAccounts).values(
+            data.customerAccounts.map((ca: any) => ({
+              ...ca, tenantId,
+              updatedAt: toDate(ca.updatedAt) ?? new Date(),
+            }))
+          );
+        }
+
+        // Restaurar movimientos de cuenta corriente DESPUÉS de customerAccounts.
+        // customerAccountMovements no tiene ownerId ni updatedAt en el schema.
+        if (data.customerAccountMovements.length > 0) {
+          await tx.insert(customerAccountMovements).values(
+            data.customerAccountMovements.map((m: any) => ({
+              ...m, tenantId,
+              createdAt: toDateRequired(m.createdAt),
             }))
           );
         }
