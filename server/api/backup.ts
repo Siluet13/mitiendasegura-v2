@@ -42,6 +42,24 @@ function noTenant(res: any) {
   return res.status(500).json({ message: "Tenant no configurado. Cerrá sesión y volvé a ingresar." });
 }
 
+/**
+ * Inserta filas en batches para evitar el límite de 65.535 parámetros bind de PostgreSQL.
+ * Los productos tienen ~16 columnas → máx 4.095 filas por INSERT sin batching.
+ * Con chunkSize=1000, cada batch usa ≤ 16.000 parámetros, bien dentro del límite.
+ * Mantiene una única transacción: si falla cualquier batch, el caller tx hace rollback.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function insertChunked(
+  fn: (chunk: any[]) => Promise<unknown>,
+  rows: any[],
+  chunkSize = 1000,
+): Promise<void> {
+  if (rows.length === 0) return;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    await fn(rows.slice(i, i + chunkSize));
+  }
+}
+
 function toCsvString(headers: string[], rows: Record<string, unknown>[]): string {
   const esc = (v: unknown): string => {
     const s = v === null || v === undefined ? "" : String(v);
@@ -121,7 +139,7 @@ export function registerBackupRoutes(app: Express): void {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
 
-    const { catsData, prodsData, custsData, salesData, saleItemsData, stockData } =
+    const { catsData, prodsData, custsData, salesData, saleItemsData, stockData, caData, camData } =
       await fetchAllData(userId, tenantId);
 
     const catMap = new Map(catsData.map((c) => [c.id, c.nombre]));
@@ -215,6 +233,34 @@ export function registerBackupRoutes(app: Express): void {
       "Movimientos de Stock"
     );
 
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(caData.map((ca) => ({
+        "Cliente": custMap.get(ca.customerId) ?? "",
+        "Saldo": ca.balance,
+        "ID Cliente": ca.customerId,
+        "ID": ca.id,
+        "Última Actualización": safeISO(ca.updatedAt).slice(0, 10),
+      }))),
+      "Cuentas Corrientes"
+    );
+
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(camData.map((m) => ({
+        "Cliente": custMap.get(m.customerId) ?? "",
+        "Tipo": m.type,
+        "Monto": m.amount,
+        "Saldo Posterior": m.balanceAfter,
+        "Observación": m.observacion ?? "",
+        "Método Pago": m.paymentMethod ?? "",
+        "Referencia ID": m.referenceId ?? "",
+        "Fecha": safeISO(m.createdAt).slice(0, 10),
+        "ID Cliente": m.customerId,
+      }))),
+      "Movimientos CC"
+    );
+
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
     const date = new Date().toISOString().slice(0, 10);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -227,7 +273,7 @@ export function registerBackupRoutes(app: Express): void {
     const { userId, tenantId } = requireTenant(req);
     if (!tenantId) return noTenant(res);
 
-    const { catsData, prodsData, custsData, salesData, saleItemsData, stockData } =
+    const { catsData, prodsData, custsData, salesData, saleItemsData, stockData, caData, camData } =
       await fetchAllData(userId, tenantId);
 
     const catMap = new Map(catsData.map((c) => [c.id, c.nombre]));
@@ -283,6 +329,32 @@ export function registerBackupRoutes(app: Express): void {
         "Producto": prodMap.get(m.productId) ?? "", "Tipo": m.tipo,
         "Cantidad": m.cantidad, "Observación": m.observacion ?? "",
         "Fecha": safeISO(m.createdAt).slice(0, 10),
+      }))
+    ));
+
+    zip.file("cuentas_corrientes.csv", toCsvString(
+      ["Cliente", "Saldo", "ID Cliente", "ID", "Última Actualización"],
+      caData.map((ca) => ({
+        "Cliente": custMap.get(ca.customerId) ?? "",
+        "Saldo": ca.balance,
+        "ID Cliente": ca.customerId,
+        "ID": ca.id,
+        "Última Actualización": safeISO(ca.updatedAt).slice(0, 10),
+      }))
+    ));
+
+    zip.file("movimientos_cc.csv", toCsvString(
+      ["Cliente", "Tipo", "Monto", "Saldo Posterior", "Observación", "Método Pago", "Referencia ID", "Fecha", "ID Cliente"],
+      camData.map((m) => ({
+        "Cliente": custMap.get(m.customerId) ?? "",
+        "Tipo": m.type,
+        "Monto": m.amount,
+        "Saldo Posterior": m.balanceAfter,
+        "Observación": m.observacion ?? "",
+        "Método Pago": m.paymentMethod ?? "",
+        "Referencia ID": m.referenceId ?? "",
+        "Fecha": safeISO(m.createdAt).slice(0, 10),
+        "ID Cliente": m.customerId,
       }))
     ));
 
@@ -435,17 +507,17 @@ export function registerBackupRoutes(app: Express): void {
               result.updated++;
             } else {
               // INSERT — producto nuevo.
-              await db.insert(products).values({
+              const [insP] = await db.insert(products).values({
                 ownerId: userId,
                 tenantId,
                 nombre,
                 activo: row.activo !== false && row.activo !== "NO",
                 ...syncFields,
                 updatedAt: undefined, // dejar que el default de DB lo maneje
-              });
-              if (codigoBarras) barcodeToId.set(normalizeKey(codigoBarras), nombre); // evitar duplicado en misma importación
-              if (sku)          skuToId.set(normalizeKey(sku), nombre);
-                                nombreToId.set(normalizeKey(nombre), nombre);
+              }).returning({ id: products.id });
+              if (codigoBarras) barcodeToId.set(normalizeKey(codigoBarras), insP.id);
+              if (sku)          skuToId.set(normalizeKey(sku), insP.id);
+                                nombreToId.set(normalizeKey(nombre), insP.id);
               result.imported++;
             }
           } catch (e: any) {
@@ -506,9 +578,9 @@ export function registerBackupRoutes(app: Express): void {
               result.updated++;
             } else {
               // INSERT — cliente nuevo.
-              await db.insert(customers).values({ ownerId: userId, tenantId, ...contactFields, updatedAt: undefined });
-              if (email) emailToId.set(normalizeKey(email), nombre);
-                         nombreToId.set(normalizeKey(nombre), nombre);
+              const [insC] = await db.insert(customers).values({ ownerId: userId, tenantId, ...contactFields, updatedAt: undefined }).returning({ id: customers.id });
+              if (email) emailToId.set(normalizeKey(email), insC.id);
+                         nombreToId.set(normalizeKey(nombre), insC.id);
               result.imported++;
             }
           } catch (e: any) {
@@ -616,6 +688,14 @@ export function registerBackupRoutes(app: Express): void {
           message: `El backup contiene ${orphanMovements.length} movimiento(s) de cuenta corriente que referencian clientes inexistentes. El backup puede estar dañado.`,
         });
       }
+
+      // sales → customers
+      const orphanSales = (data.sales as any[]).filter((s: any) => s.customerId && !customerIds.has(s.customerId));
+      if (orphanSales.length > 0) {
+        return res.status(400).json({
+          message: `El backup contiene ${orphanSales.length} venta(s) que referencian clientes inexistentes. El backup puede estar dañado.`,
+        });
+      }
     }
 
     function toDate(v: unknown): Date | null {
@@ -680,89 +760,93 @@ export function registerBackupRoutes(app: Express): void {
           });
         }
 
-        if (data.categories.length > 0) {
-          await tx.insert(categories).values(
-            data.categories.map((c: any) => ({
-              ...c, ownerId: userId, tenantId,
-              createdAt: toDateRequired(c.createdAt),
-              updatedAt: toDateRequired(c.updatedAt),
-            }))
-          );
-        }
+        // Insertar en chunks de 1000 filas para evitar el límite de 65535 parámetros de PostgreSQL.
+        await insertChunked(
+          (rows) => tx.insert(categories).values(rows),
+          data.categories.map((c: any) => ({
+            ...c, ownerId: userId, tenantId,
+            createdAt: toDateRequired(c.createdAt),
+            updatedAt: toDateRequired(c.updatedAt),
+          })),
+        );
 
-        if (data.products.length > 0) {
-          await tx.insert(products).values(
-            data.products.map((p: any) => ({
-              ...p, ownerId: userId, tenantId,
-              createdAt: toDateRequired(p.createdAt),
-              updatedAt: toDateRequired(p.updatedAt),
-            }))
-          );
-        }
+        await insertChunked(
+          (rows) => tx.insert(products).values(rows),
+          data.products.map((p: any) => ({
+            ...p, ownerId: userId, tenantId,
+            createdAt: toDateRequired(p.createdAt),
+            updatedAt: toDateRequired(p.updatedAt),
+          })),
+        );
 
-        if (data.customers.length > 0) {
-          await tx.insert(customers).values(
-            data.customers.map((c: any) => ({
-              ...c, ownerId: userId, tenantId,
-              createdAt: toDateRequired(c.createdAt),
-              updatedAt: toDateRequired(c.updatedAt),
-            }))
-          );
-        }
+        await insertChunked(
+          (rows) => tx.insert(customers).values(rows),
+          data.customers.map((c: any) => ({
+            ...c, ownerId: userId, tenantId,
+            createdAt: toDateRequired(c.createdAt),
+            updatedAt: toDateRequired(c.updatedAt),
+          })),
+        );
 
         // Restaurar cuentas corrientes DESPUÉS de clientes (FK: customerId → customers.id).
         // customerAccounts no tiene ownerId ni createdAt en el schema.
-        if (data.customerAccounts.length > 0) {
-          await tx.insert(customerAccounts).values(
-            data.customerAccounts.map((ca: any) => ({
-              ...ca, tenantId,
-              updatedAt: toDate(ca.updatedAt) ?? new Date(),
-            }))
-          );
-        }
+        await insertChunked(
+          (rows) => tx.insert(customerAccounts).values(rows),
+          data.customerAccounts.map((ca: any) => ({
+            ...ca, tenantId,
+            updatedAt: toDate(ca.updatedAt) ?? new Date(),
+          })),
+        );
 
         // Restaurar movimientos de cuenta corriente DESPUÉS de customerAccounts.
         // customerAccountMovements no tiene ownerId ni updatedAt en el schema.
-        if (data.customerAccountMovements.length > 0) {
-          await tx.insert(customerAccountMovements).values(
-            data.customerAccountMovements.map((m: any) => ({
-              ...m, tenantId,
-              createdAt: toDateRequired(m.createdAt),
-            }))
-          );
-        }
+        await insertChunked(
+          (rows) => tx.insert(customerAccountMovements).values(rows),
+          data.customerAccountMovements.map((m: any) => ({
+            ...m, tenantId,
+            createdAt: toDateRequired(m.createdAt),
+          })),
+        );
 
-        if (data.sales.length > 0) {
-          await tx.insert(sales).values(
-            data.sales.map((s: any) => ({
-              ...s, ownerId: userId, userId, tenantId,
-              createdAt: toDateRequired(s.createdAt),
-            }))
-          );
-        }
+        await insertChunked(
+          (rows) => tx.insert(sales).values(rows),
+          data.sales.map((s: any) => ({
+            ...s, ownerId: userId, userId, tenantId,
+            createdAt: toDateRequired(s.createdAt),
+          })),
+        );
 
-        if (data.saleItems.length > 0) {
-          await tx.insert(saleItems).values(
-            data.saleItems.map((si: any) => ({
-              ...si, createdAt: toDateRequired(si.createdAt),
-            }))
-          );
-        }
+        await insertChunked(
+          (rows) => tx.insert(saleItems).values(rows),
+          data.saleItems.map((si: any) => ({
+            ...si, createdAt: toDateRequired(si.createdAt),
+          })),
+        );
 
-        if (data.stockMovements.length > 0) {
-          await tx.insert(stockMovements).values(
-            data.stockMovements.map((m: any) => ({
-              ...m, ownerId: userId, userId, tenantId,
-              createdAt: toDateRequired(m.createdAt),
-            }))
-          );
-        }
+        await insertChunked(
+          (rows) => tx.insert(stockMovements).values(rows),
+          data.stockMovements.map((m: any) => ({
+            ...m, ownerId: userId, userId, tenantId,
+            createdAt: toDateRequired(m.createdAt),
+          })),
+        );
 
         // Las licencias son datos del sistema SaaS y NUNCA se restauran desde un backup.
       });
 
-      logEvent({ module: "backup", event: "BACKUP_RESTORED", message: "Backup restaurado completamente", userId, ownerId: userId, tenantId, details: body.stats ?? null });
-      res.json({ ok: true, stats: body.stats });
+      // Devolver los conteos reales de lo restaurado, no los del archivo.
+      const actualStats = {
+        categories:               data.categories.length,
+        products:                 data.products.length,
+        customers:                data.customers.length,
+        customerAccounts:         data.customerAccounts.length,
+        customerAccountMovements: data.customerAccountMovements.length,
+        sales:                    data.sales.length,
+        saleItems:                data.saleItems.length,
+        stockMovements:           data.stockMovements.length,
+      };
+      logEvent({ module: "backup", event: "BACKUP_RESTORED", message: "Backup restaurado completamente", userId, ownerId: userId, tenantId, details: actualStats });
+      res.json({ ok: true, stats: actualStats });
     } catch (err: any) {
       console.error("Restore error:", err);
       res.status(500).json({ message: err?.message ?? "Error al restaurar el backup" });
@@ -922,16 +1006,16 @@ export function registerBackupRoutes(app: Express): void {
                   result.sinCambios++;
                 }
               } else {
-                await tx.insert(products).values({
+                const [insPS] = await tx.insert(products).values({
                   ownerId: userId,
                   tenantId,
                   nombre,
                   activo: row.activo !== false && row.activo !== "NO",
                   ...syncFields,
-                });
-                if (codigoBarras) barcodeToId.set(normalizeKey(codigoBarras), nombre);
-                if (sku)          skuToId.set(normalizeKey(sku), nombre);
-                                  nombreToId.set(normalizeKey(nombre), nombre);
+                }).returning({ id: products.id });
+                if (codigoBarras) barcodeToId.set(normalizeKey(codigoBarras), insPS.id);
+                if (sku)          skuToId.set(normalizeKey(sku), insPS.id);
+                                  nombreToId.set(normalizeKey(nombre), insPS.id);
                 result.creados++;
               }
             } catch (e: any) {
@@ -1001,9 +1085,9 @@ export function registerBackupRoutes(app: Express): void {
                   result.sinCambios++;
                 }
               } else {
-                await tx.insert(customers).values({ ownerId: userId, tenantId, ...contactFields });
-                if (email) emailToId.set(normalizeKey(email), nombre);
-                           nombreToId.set(normalizeKey(nombre), nombre);
+                const [insCS] = await tx.insert(customers).values({ ownerId: userId, tenantId, ...contactFields }).returning({ id: customers.id });
+                if (email) emailToId.set(normalizeKey(email), insCS.id);
+                           nombreToId.set(normalizeKey(nombre), insCS.id);
                 result.creados++;
               }
             } catch (e: any) {
